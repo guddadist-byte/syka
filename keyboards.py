@@ -15,7 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import constants
 from bot_cache import CachedChat
 from constants import ROLE_LABELS
-from models import Point, Template, User
+from models import PendingNotification, Point, Template, User
 
 
 # --- main menu ---------------------------------------------------------------
@@ -23,7 +23,7 @@ from models import Point, Template, User
 
 def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
     builder = ReplyKeyboardBuilder()
-    builder.row(KeyboardButton(text=constants.BTN_SHIFT_OFF if on_shift else constants.BTN_SHIFT_ON))
+    builder.row(KeyboardButton(text=constants.BTN_SHIFT_ON if on_shift else constants.BTN_SHIFT_OFF))
     builder.row(
         KeyboardButton(text=constants.BTN_UNREAD),
         KeyboardButton(text=constants.BTN_RECENT),
@@ -48,9 +48,16 @@ def cancel_reply_kb() -> ReplyKeyboardMarkup:
 def chat_list_kb(chats: list[CachedChat]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for chat in chats:
-        label = f"💬 {chat.client_name or 'Клиент'}"
-        if chat.unread_count:
-            label = f"📩 {chat.unread_count} · {label}"
+        # A chat with exactly one message, from the client, is a brand-new
+        # lead — nobody has replied yet, distinct from an existing chat
+        # that just got another message.
+        is_new_lead = len(chat.messages) == 1 and chat.messages[0].direction == "in"
+        if is_new_lead:
+            label = f"🆕 Новый клиент · {chat.client_name or 'Клиент'}"
+        else:
+            label = f"💬 {chat.client_name or 'Клиент'}"
+            if chat.unread_count:
+                label = f"📩 {chat.unread_count} · {label}"
         builder.row(InlineKeyboardButton(text=label, callback_data=f"{constants.PREFIX_CHAT}_{chat.short_id}"))
     return builder.as_markup()
 
@@ -162,6 +169,7 @@ def template_detail_kb(template_id: int) -> InlineKeyboardMarkup:
 def admin_panel_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
+    builder.row(InlineKeyboardButton(text="🕐 Кто на смене", callback_data="adm_onshift"))
     builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
     builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
@@ -172,16 +180,19 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
+    builder.row(InlineKeyboardButton(text="🔕 Тихий режим", callback_data="adm_quiethours"))
     return builder.as_markup()
 
 
 def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
+    builder.row(InlineKeyboardButton(text="🕐 Кто на смене", callback_data="adm_onshift"))
     builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
     builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
+    builder.row(InlineKeyboardButton(text="🔕 Тихий режим", callback_data="adm_quiethours"))
     return builder.as_markup()
 
 
@@ -308,6 +319,27 @@ def backup_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="⏱ Периодичность", callback_data="adm_backupinterval"))
     builder.row(InlineKeyboardButton(text="📤 Сделать бэкап сейчас", callback_data="adm_backupnow"))
+    return builder.as_markup()
+
+
+def quiet_hours_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🔴 Выключить" if is_enabled else "🟢 Включить", callback_data="adm_quiethourstoggle"
+        )
+    )
+    return builder.as_markup()
+
+
+def quiet_hours_digest_kb(items: list[PendingNotification]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for item in items:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"💬 {item.client_name or 'Клиент'}", callback_data=f"{constants.PREFIX_CHAT}_{item.short_id}"
+            )
+        )
     return builder.as_markup()
 
 

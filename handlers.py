@@ -265,7 +265,9 @@ async def toggle_shift(message: Message) -> None:
     user = await database.get_user(message.from_user.id)
     if user is None:
         return
-    new_state = message.text == constants.BTN_SHIFT_ON
+    # The button shows the current status (see main_menu_kb), so a tap means
+    # "flip it": showing "Отдыхаю" means the user is on shift right now.
+    new_state = message.text == constants.BTN_SHIFT_OFF
     await database.set_shift(message.from_user.id, new_state)
     await message.answer(
         "💼 Вы на смене" if new_state else "🛌 Вы отдыхаете",
@@ -1193,6 +1195,27 @@ async def cb_admin_broadcast_send(callback: CallbackQuery, state: FSMContext) ->
 # --- admin: points -------------------------------------------------------
 
 
+@admin_router.callback_query(F.data == "adm_onshift")
+async def cb_admin_onshift(callback: CallbackQuery) -> None:
+    await callback.answer()
+    users = await database.list_on_shift_users()
+    if not users:
+        await callback.message.answer("🕐 Сейчас никто не на смене.")
+        return
+    lines = ["🕐 На смене сейчас:"]
+    for user in users:
+        label = user.full_name or user.username or str(user.telegram_id)
+        role_label = constants.ROLE_LABELS.get(user.role, user.role)
+        if user.role == constants.MANAGER and user.responsible_point_id:
+            point = await database.get_point(user.responsible_point_id)
+            point_label = point.name if point else "—"
+        else:
+            points = await database.get_user_points(user.telegram_id)
+            point_label = ", ".join(p.name for p in points) or "—"
+        lines.append(f"👤 {label} ({role_label}) — {point_label}")
+    await callback.message.answer("\n".join(lines))
+
+
 @admin_router.callback_query(F.data == "adm_pointsmenu")
 async def cb_admin_points_menu(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -1821,6 +1844,28 @@ async def cb_admin_backup_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_backup_config()
     await database.update_backup_config(actor_id=callback.from_user.id, is_enabled=0 if cfg.is_enabled else 1)
+    await callback.message.answer("Готово.")
+
+
+@admin_router.callback_query(F.data == "adm_quiethours")
+async def cb_admin_quiethours(callback: CallbackQuery) -> None:
+    await callback.answer()
+    cfg = await database.get_quiet_hours_config()
+    text = (
+        f"🔕 Тихий режим: {'включён' if cfg.is_enabled else 'выключен'}\n\n"
+        "Пока ни одна из подписанных точек сотрудника не открыта — уведомления "
+        "не шлются, а копятся и приходят одним списком, как только точка "
+        "откроется (если точек несколько — по самой ранней). Круглосуточные "
+        "точки уведомляют как обычно, без задержки."
+    )
+    await callback.message.answer(text, reply_markup=keyboards.quiet_hours_settings_kb(bool(cfg.is_enabled)))
+
+
+@admin_router.callback_query(F.data == "adm_quiethourstoggle")
+async def cb_admin_quiethours_toggle(callback: CallbackQuery) -> None:
+    await callback.answer()
+    cfg = await database.get_quiet_hours_config()
+    await database.update_quiet_hours_config(actor_id=callback.from_user.id, is_enabled=0 if cfg.is_enabled else 1)
     await callback.message.answer("Готово.")
 
 

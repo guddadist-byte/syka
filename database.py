@@ -202,6 +202,14 @@ async def list_all_users() -> list[models.User]:
     return [models.User.from_row(r) for r in rows]
 
 
+async def list_on_shift_users() -> list[models.User]:
+    rows = await _fetchall(
+        "SELECT * FROM users WHERE on_shift = 1 AND status = ? ORDER BY full_name",
+        (constants.STATUS_APPROVED,),
+    )
+    return [models.User.from_row(r) for r in rows]
+
+
 async def update_user_full_name(telegram_id: int, full_name: str) -> None:
     await _execute("UPDATE users SET full_name = ? WHERE telegram_id = ?", (full_name, telegram_id))
 
@@ -771,6 +779,54 @@ async def mark_backup_done(at: datetime) -> None:
         "UPDATE backup_config SET last_backup_at = ? WHERE id = 1",
         (at.strftime("%Y-%m-%d %H:%M:%S"),),
     )
+
+
+# --- quiet hours -----------------------------------------------------------
+
+
+async def get_quiet_hours_config() -> models.QuietHoursConfig:
+    row = await _fetchone("SELECT * FROM quiet_hours_config WHERE id = 1")
+    assert row is not None
+    return models.QuietHoursConfig.from_row(row)
+
+
+async def update_quiet_hours_config(actor_id: int | None = None, **fields: Any) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    if actor_id is not None:
+        fields["updated_by"] = actor_id
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    await _execute(f"UPDATE quiet_hours_config SET {columns} WHERE id = 1", tuple(fields.values()))
+
+
+async def queue_pending_notification(telegram_id: int, chat_id: str, short_id: str,
+                                      client_name: str | None, preview_text: str | None) -> None:
+    await _execute(
+        """
+        INSERT INTO pending_notifications (telegram_id, chat_id, short_id, client_name, preview_text)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (telegram_id, chat_id, short_id, client_name, preview_text),
+    )
+
+
+async def list_users_with_pending_notifications() -> list[int]:
+    rows = await _fetchall("SELECT DISTINCT telegram_id FROM pending_notifications")
+    return [int(r["telegram_id"]) for r in rows]
+
+
+async def pop_pending_notifications(telegram_id: int) -> list[models.PendingNotification]:
+    """Fetches and deletes (atomically enough for our single-writer-lock
+    setup) all queued notifications for a user, oldest first."""
+    rows = await _fetchall(
+        "SELECT * FROM pending_notifications WHERE telegram_id = ? ORDER BY created_at",
+        (telegram_id,),
+    )
+    items = [models.PendingNotification.from_row(r) for r in rows]
+    if items:
+        await _execute("DELETE FROM pending_notifications WHERE telegram_id = ?", (telegram_id,))
+    return items
 
 
 # --- chats / messages ------------------------------------------------------

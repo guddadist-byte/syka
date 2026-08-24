@@ -184,7 +184,20 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         await database.set_chat_unread_count(chat.chat_id, final_chat.unread_count)
 
 
-async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: str) -> None:
+async def _is_user_awake(telegram_id: int) -> bool:
+    """Whether now is within working hours of at least one of the user's
+    subscribed points. No subscriptions -> nothing to gate on, fail-open."""
+    points = await database.get_user_points(telegram_id)
+    if not points:
+        return True
+    return any(utils.is_point_open_now(p.working_hours) for p in points)
+
+
+async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: str, *, quiet_enabled: bool,
+                              chat_id: str, client_name: str | None, preview_text: str | None) -> None:
+    if quiet_enabled and not await _is_user_awake(telegram_id):
+        await database.queue_pending_notification(telegram_id, chat_id, short_id, client_name, preview_text)
+        return
     try:
         await bot.send_message(telegram_id, text, reply_markup=keyboards.chat_notification_kb(short_id))
     except TelegramForbiddenError:
@@ -197,14 +210,20 @@ async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: b
                                message: bot_cache.CachedMessage, bot: Bot) -> None:
     short_id = await bot_cache.get_short_id(chat_id)
     client_name = html.escape(cached_chat.client_name or "клиент")
-    preview = html.escape(message.text[:200]) if message.text else "(фото)"
+    raw_preview = message.text[:200] if message.text else None
+    preview = html.escape(raw_preview) if raw_preview else "(фото)"
     if cached_chat.item_title and cached_chat.item_url:
         item_line = f'📦 <a href="{html.escape(cached_chat.item_url)}">{html.escape(cached_chat.item_title)}</a>'
     elif cached_chat.item_title:
         item_line = f"📦 {html.escape(cached_chat.item_title)}"
     else:
         item_line = "📦 Сообщение в профиль (без объявления)"
-    text = f"📩 Новое сообщение от {client_name}\n{item_line}\n\n{preview}"
+    # Exactly one message, from the client, and it's this one -> nobody has
+    # replied yet, this is a brand-new lead, not just another message in an
+    # existing conversation.
+    is_new_lead = len(cached_chat.messages) == 1 and cached_chat.messages[0].direction == "in"
+    header = f"🆕 Новый клиент! {client_name}" if is_new_lead else f"📩 Новое сообщение от {client_name}"
+    text = f"{header}\n{item_line}\n\n{preview}"
 
     if point_id is None:
         # Fully unresolved chat (coords present but no matching point) —
@@ -215,8 +234,15 @@ async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: b
         return
 
     recipients = {u.telegram_id: u for u in await database.list_point_subscribers(point_id, on_shift_only=True)}
+    quiet_cfg = await database.get_quiet_hours_config()
     for user_id in recipients:
-        await _send_notification(bot, user_id, text, short_id)
+        await _send_notification(
+            bot, user_id, text, short_id,
+            quiet_enabled=bool(quiet_cfg.is_enabled),
+            chat_id=chat_id,
+            client_name=cached_chat.client_name,
+            preview_text=raw_preview,
+        )
 
 
 async def _reload_accounts_loop() -> None:
@@ -278,12 +304,44 @@ async def _backup_loop(bot: Bot, db_path: str) -> None:
             logger.exception("_backup_loop: failed")
 
 
+async def _send_digest(bot: Bot, telegram_id: int, items: list[models.PendingNotification]) -> None:
+    lines = [f"🔔 Пока вы отдыхали, накопилось сообщений: {len(items)}\n"]
+    for item in items:
+        name = html.escape(item.client_name or "клиент")
+        preview = html.escape((item.preview_text or "")[:200]) or "(фото)"
+        lines.append(f"👤 {name}: {preview}")
+    try:
+        await bot.send_message(telegram_id, "\n".join(lines), reply_markup=keyboards.quiet_hours_digest_kb(items))
+    except TelegramForbiddenError:
+        await database.mark_user_unreachable(telegram_id)
+    except Exception:
+        logger.exception("_send_digest: failed to notify %s", telegram_id)
+
+
+async def _quiet_hours_flush_loop(bot: Bot) -> None:
+    while True:
+        await asyncio.sleep(constants.QUIET_HOURS_FLUSH_INTERVAL_SECONDS)
+        try:
+            cfg = await database.get_quiet_hours_config()
+            if not cfg.is_enabled:
+                continue
+            for telegram_id in await database.list_users_with_pending_notifications():
+                if not await _is_user_awake(telegram_id):
+                    continue
+                items = await database.pop_pending_notifications(telegram_id)
+                if items:
+                    await _send_digest(bot, telegram_id, items)
+        except Exception:
+            logger.exception("_quiet_hours_flush_loop: failed")
+
+
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     accounts = await database.list_avito_accounts(active_only=True)
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
     tasks.append(asyncio.create_task(_reload_accounts_loop()))
     tasks.append(asyncio.create_task(_prune_messages_loop()))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
+    tasks.append(asyncio.create_task(_quiet_hours_flush_loop(bot)))
     return tasks
 
 
