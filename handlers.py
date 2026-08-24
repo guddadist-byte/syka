@@ -949,6 +949,10 @@ async def cb_admin_set_role(callback: CallbackQuery) -> None:
 
     await database.set_user_role(user_id, role, callback.from_user.id)
     await callback.message.answer("✅ Роль изменена.")
+    try:
+        await callback.bot.send_message(user_id, f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[role]}")
+    except TelegramForbiddenError:
+        await database.mark_user_unreachable(user_id)
 
 
 @admin_router.callback_query(F.data.startswith(f"{constants.PREFIX_APPR}_"))
@@ -1052,6 +1056,12 @@ async def cb_point_action(callback: CallbackQuery) -> None:
         await database.set_user_role(user_id, constants.MANAGER, callback.from_user.id)
         await database.set_responsible_point(user_id, point_id)
         await callback.message.answer("✅ Роль «Ответственный точки» назначена.")
+        try:
+            await callback.bot.send_message(
+                user_id, f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[constants.MANAGER]}"
+            )
+        except TelegramForbiddenError:
+            await database.mark_user_unreachable(user_id)
     elif mode == "reassign":
         chat = await bot_cache.resolve_chat(key)
         if chat and chat.item_id:
