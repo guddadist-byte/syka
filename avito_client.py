@@ -253,6 +253,13 @@ class AvitoClient:
                                 else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),
                 )
             )
+        # Never assumed to already be chronological — the API's actual
+        # order was never confirmed, and everything downstream (dialog
+        # display, unread = trailing "in" messages) depends on oldest-
+        # first order. Sorting explicitly here means it's correct either
+        # way, and every caller (tasks.py's poller, the "🔄 Обновить"
+        # button) gets it for free from this one place.
+        messages.sort(key=lambda m: m.created_at)
         return messages
 
     async def send_text_message(self, chat_id: str, text: str, message_uuid: str | None = None) -> models.AvitoMessage:
