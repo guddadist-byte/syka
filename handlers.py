@@ -677,15 +677,19 @@ async def _send_photos(anchor: Message, state: FSMContext, messages: list[Messag
 async def _apply_point_placeholders(text: str) -> str:
     """Substitutes !<CODE>А / !<CODE>В in template text with that point's
     address / working hours (e.g. "!ТКЧА" -> the ТКЧ point's address).
-    Codes are set via the bulk address/hours import or a point's "🔤 Код".
+
+    Works for every point, not just ones with an explicit "🔤 Код" set —
+    <CODE> matches either points.code (set via bulk import or manually,
+    survives renames) or, as a fallback, the point's plain name (so it
+    works immediately for a point literally named "ТКЧ" with no extra
+    setup at all).
     """
     if "!" not in text:
         return text
     for point in await database.list_points(active_only=False):
-        if not point.code:
-            continue
-        text = text.replace(f"!{point.code}А", point.address or "")
-        text = text.replace(f"!{point.code}В", point.working_hours or "")
+        for key in filter(None, {point.code, point.name}):
+            text = text.replace(f"!{key}А", point.address or "")
+            text = text.replace(f"!{key}В", point.working_hours or "")
     return text
 
 
