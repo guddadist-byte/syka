@@ -86,10 +86,28 @@ async def get_short_id(chat_id: str) -> str:
         return short_id
 
 
+def _trailing_unread(messages: "deque[CachedMessage]") -> int:
+    """Count of client ("in") messages since the last staff reply.
+
+    Avito's chat-list API has no unread/read field at all (confirmed live:
+    a chat object's only top-level keys are context/created/id/
+    last_message/updated/users) — this is the only signal we actually
+    have, and it happens to be a good one: it's derived fresh from the
+    real message history every time, so it self-corrects the moment *any*
+    reply lands as the newest message, whether sent through this bot or
+    directly in Avito's own app/website.
+    """
+    count = 0
+    for m in reversed(messages):
+        if m.direction != "in":
+            break
+        count += 1
+    return count
+
+
 async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: int,
                        client_name: str, item_id: str | None = None,
                        item_title: str | None = None, item_url: str | None = None,
-                       unread_count: int | None = None,
                        initial_messages: list[CachedMessage] | None = None) -> CachedChat:
     async with _lock:
         chat = _chats.get(chat_id)
@@ -110,11 +128,11 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 item_id=item_id,
                 item_title=item_title,
                 item_url=item_url,
-                unread_count=unread_count if unread_count is not None else 0,
             )
             if initial_messages:
                 chat.messages.extend(initial_messages)
                 chat.last_message_at = chat.messages[-1].created_at
+                chat.unread_count = _trailing_unread(chat.messages)
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:
@@ -129,8 +147,6 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 chat.item_title = item_title
             if item_url is not None:
                 chat.item_url = item_url
-            if unread_count is not None:
-                chat.unread_count = unread_count
         return chat
 
 
@@ -165,10 +181,7 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
                     return False
         chat.messages.append(message)
         chat.last_message_at = message.created_at
-        # unread_count is no longer bumped here — it's synced from Avito's
-        # own "unread" count on every poll (see tasks.py._process_chat),
-        # which stays correct even when a reply was sent from Avito's own
-        # app/website rather than through this bot.
+        chat.unread_count = _trailing_unread(chat.messages)
         return True
 
 

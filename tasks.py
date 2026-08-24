@@ -84,19 +84,13 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
                 )
             )
 
-    # chat.unread_count comes straight from Avito's own chat-list "unread"
-    # field — trusted as-is, synced on every poll. A locally-accumulated
-    # counter (the old design) only ever reset via a bot-driven action, so
-    # it drifted permanently out of sync for any chat a staff member
-    # replied to directly in Avito's own app/website instead of the bot.
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
         item_title=chat.item_title, item_url=chat.item_url,
-        unread_count=chat.unread_count,
         initial_messages=initial_messages,
     )
-    await database.set_chat_unread_count(chat.chat_id, chat.unread_count)
+    await database.set_chat_unread_count(chat.chat_id, cached.unread_count)
     await database.upsert_chat_summary(
         chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
         client_name=chat.client_name,
@@ -147,6 +141,13 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             last_message_at=sent_at_str, last_message_text=message.text, last_message_dir="in",
         )
         await _notify_subscribers(chat.chat_id, point_id, cached, cached_message, bot)
+
+    # unread_count may have changed during the loop above — a new inbound
+    # message, or an "out" reply sent directly in Avito's own app rather
+    # than through this bot — persist the final, self-corrected value.
+    final_chat = await bot_cache.get_chat(chat.chat_id)
+    if final_chat is not None:
+        await database.set_chat_unread_count(chat.chat_id, final_chat.unread_count)
 
 
 async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: str) -> None:
