@@ -30,17 +30,28 @@ logger = logging.getLogger(__name__)
 
 async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
     backoff = constants.ERROR_BACKOFF_BASE_SECONDS
+    cycle = 0
     while True:
         client = avito_client.get_pool().get(account.id)
         if client is None:
             await asyncio.sleep(constants.POLL_INTERVAL_SECONDS)
             continue
         try:
-            chats = await client.get_chats()
+            # Most cycles only ask Avito for its own "unread" chats — far
+            # fewer chats to walk per poll, so a cycle finishes faster and
+            # (post-restart especially) stops burning the ~1 req/sec/account
+            # get_messages() budget on chats that haven't changed. Every
+            # Nth cycle does a full unfiltered pass as a safety net, since
+            # Avito's server-side "unread" semantics were never confirmed
+            # to match our own (its chat objects carry no read/unread field
+            # at all — see avito_client.get_chats).
+            is_full_sync = cycle % constants.FULL_SYNC_EVERY_N_POLLS == 0
+            chats = await client.get_chats(unread_only=not is_full_sync)
             for chat in chats:
                 await _process_chat(chat, account, bot, client)
             await database.set_avito_account_error(account.id, None)
             backoff = constants.ERROR_BACKOFF_BASE_SECONDS
+            cycle += 1
             await asyncio.sleep(constants.POLL_INTERVAL_SECONDS)
         except asyncio.CancelledError:
             raise
@@ -54,6 +65,40 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
             backoff = min(backoff * 2, constants.ERROR_BACKOFF_MAX_SECONDS)
 
 
+async def _build_initial_messages(chat_id: str) -> list[bot_cache.CachedMessage]:
+    messages: list[bot_cache.CachedMessage] = []
+    for m in await database.get_recent_messages(chat_id, limit=50):
+        messages.append(
+            bot_cache.CachedMessage(
+                avito_message_id=m.avito_message_id,
+                direction=m.direction,
+                text=m.text or "",
+                has_image=bool(m.has_image),
+                created_at=utils.parse_utc(m.sent_at),
+            )
+        )
+    return messages
+
+
+async def hydrate_cache_from_db() -> None:
+    """Eagerly load every known chat from the durable DB into bot_cache.
+
+    Called once at startup, before the bot serves any Telegram updates or
+    the pollers run — without this, bot_cache starts empty and only
+    refills chat-by-chat as the rate-limited poller re-discovers each chat
+    from Avito, so "📩 Непрочитанные" is inaccurate/growing for the first
+    stretch after every restart. This is a pure DB read (no Avito calls),
+    so it's fast even for hundreds of chats.
+    """
+    for chat in await database.list_all_chats():
+        initial_messages = await _build_initial_messages(chat.chat_id)
+        await bot_cache.upsert_chat(
+            chat.chat_id, point_id=chat.point_id, avito_account_id=chat.avito_account_id,
+            client_name=chat.client_name or "", item_id=chat.item_id,
+            initial_messages=initial_messages,
+        )
+
+
 async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bot: Bot,
                          client: "avito_client.AvitoClient") -> None:
     # Confirmed against a live account: the chat-list response already
@@ -65,24 +110,13 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     point_id = point.id if point else None
 
     # Read durable state before touching bot_cache — if this chat isn't in
-    # the in-memory cache yet (e.g. right after a restart), upsert_chat
-    # seeds its message history from this instead of starting empty. The
-    # extra DB round trip only happens once per chat per process lifetime
-    # (only when it's not cached yet), not every poll.
+    # the in-memory cache yet (e.g. a chat hydrate_cache_from_db() didn't
+    # know about — brand new since the last restart), upsert_chat seeds
+    # its message history from this instead of starting empty. The extra
+    # DB round trip only happens once per chat per process lifetime (only
+    # when it's not cached yet), not every poll.
     was_cached = await bot_cache.get_chat(chat.chat_id) is not None
-
-    initial_messages: list[bot_cache.CachedMessage] = []
-    if not was_cached:
-        for m in await database.get_recent_messages(chat.chat_id, limit=50):
-            initial_messages.append(
-                bot_cache.CachedMessage(
-                    avito_message_id=m.avito_message_id,
-                    direction=m.direction,
-                    text=m.text or "",
-                    has_image=bool(m.has_image),
-                    created_at=utils.parse_utc(m.sent_at),
-                )
-            )
+    initial_messages = [] if was_cached else await _build_initial_messages(chat.chat_id)
 
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,

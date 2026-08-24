@@ -734,6 +734,11 @@ async def get_chat_summary(chat_id: str) -> models.ChatSummary | None:
     return models.ChatSummary.from_row(row) if row else None
 
 
+async def list_all_chats() -> list[models.ChatSummary]:
+    rows = await _fetchall("SELECT * FROM chats")
+    return [models.ChatSummary.from_row(r) for r in rows]
+
+
 async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int | None = None,
                                item_id: str | None = None, client_name: str | None = None,
                                last_message_at: str | None = None, last_message_text: str | None = None,

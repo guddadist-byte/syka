@@ -143,6 +143,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="🌐 Прокси", callback_data="adm_proxy"))
     builder.row(InlineKeyboardButton(text="🏢 Настройки подразделений", callback_data="adm_points"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
+    builder.row(InlineKeyboardButton(text="🔍 Проверка близких точек", callback_data="adm_pointconflicts"))
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))

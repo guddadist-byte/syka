@@ -1074,6 +1074,52 @@ async def cb_admin_points(callback: CallbackQuery) -> None:
     await callback.message.answer("🏢 Подразделения:", reply_markup=builder.as_markup())
 
 
+@admin_router.callback_query(F.data == "adm_pointconflicts")
+async def cb_admin_point_conflicts(callback: CallbackQuery) -> None:
+    await callback.answer("Проверяю…")
+    points = await database.list_points(active_only=False)
+    all_coords: list[tuple[int, str, float, float]] = []
+    for p in points:
+        for c in await database.list_point_coordinates(p.id):
+            all_coords.append((p.id, p.name, c.lat, c.lon))
+
+    # Minimum distance per distinct point pair — two points can each carry
+    # many coordinates (one per ad ever matched to them), so the same pair
+    # of points can show up via several coordinate combinations; only the
+    # closest one is actually informative.
+    conflict_map: dict[tuple[int, int], tuple[str, str, float]] = {}
+    for i in range(len(all_coords)):
+        pid1, name1, lat1, lon1 = all_coords[i]
+        for j in range(i + 1, len(all_coords)):
+            pid2, name2, lat2, lon2 = all_coords[j]
+            if pid1 == pid2:
+                continue
+            dist = utils.haversine_distance_m(lat1, lon1, lat2, lon2)
+            if dist > constants.POINT_CONFLICT_WARNING_M:
+                continue
+            pair_key = (min(pid1, pid2), max(pid1, pid2))
+            existing = conflict_map.get(pair_key)
+            if existing is None or dist < existing[2]:
+                conflict_map[pair_key] = (name1, name2, dist)
+
+    if not conflict_map:
+        await callback.message.answer(
+            f"🔍 Точек ближе {constants.POINT_CONFLICT_WARNING_M:.0f} м друг к другу не найдено."
+        )
+        return
+
+    conflicts = sorted(conflict_map.values(), key=lambda c: c[2])
+    lines = [f"🔍 Точки на расстоянии до {constants.POINT_CONFLICT_WARNING_M:.0f} м друг от друга:", ""]
+    for name1, name2, dist in conflicts:
+        lines.append(f"⚠️ «{name1}» ↔ «{name2}»: {dist:.0f} м")
+    lines.append(
+        "\nЕсли это реально разные адреса — чаты между ними могут путаться "
+        "(допуск автосвязки — {:.0f} м). Разбирайте вручную через «🔀 Переназначить точку» "
+        "в конкретном чате.".format(constants.COORD_MAX_DISTANCE_M)
+    )
+    await callback.message.answer("\n".join(lines))
+
+
 @admin_router.callback_query(F.data.startswith("adm_pointedit_"))
 async def cb_admin_point_edit(callback: CallbackQuery) -> None:
     await callback.answer()

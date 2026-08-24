@@ -42,6 +42,7 @@ async def main() -> None:
         await database.seed_from_credentials_file(static_cfg.credentials_path)
         await database.backfill_fallback_items()
         await bot_cache.init_cache()
+        await tasks.hydrate_cache_from_db()
 
         bot = await config.build_bot(static_cfg)
 
