@@ -338,10 +338,22 @@ async def resolve_point_by_coords(lat: float, lon: float,
     return await get_point(best_point_id)
 
 
+async def _add_coordinate_if_new(point_id: int, lat: float, lon: float, source: str,
+                                  dedup_distance_m: float = 15.0) -> None:
+    """Repeated syncs see the same ad coordinates every run — skip the
+    insert if a coordinate this close is already stored for the point, so
+    point_coordinates doesn't grow unbounded and stays readable in the
+    admin point-detail screen."""
+    for existing in await list_point_coordinates(point_id):
+        if utils.haversine_distance_m(lat, lon, existing.lat, existing.lon) <= dedup_distance_m:
+            return
+    await add_point_coordinate(point_id, lat, lon, source=source)
+
+
 async def upsert_point_from_avito(name: str, address: str | None, lat: float, lon: float) -> models.Point:
     existing = await resolve_point_by_coords(lat, lon)
     if existing is not None:
-        await add_point_coordinate(existing.id, lat, lon, source="avito_sync")
+        await _add_coordinate_if_new(existing.id, lat, lon, source="avito_sync")
         if not existing.name_is_custom and address:
             await update_point_details(existing.id, address=address)
         return existing

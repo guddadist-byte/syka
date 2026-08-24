@@ -280,6 +280,52 @@ async def show_profile(message: Message) -> None:
     await message.answer("\n".join(lines), reply_markup=keyboards.profile_kb())
 
 
+@menu_router.message(F.text == constants.BTN_MY_POINTS, StateFilter("*"), ApprovedUser())
+async def show_my_points(message: Message) -> None:
+    user = await database.get_user(message.from_user.id)
+    if user is None:
+        return
+    all_points = await database.list_points()
+    current = {p.id for p in await database.get_user_points(user.telegram_id)}
+    kb = keyboards.point_multiselect_kb(all_points, current, "mysub", key=str(user.telegram_id))
+    await message.answer(
+        "📍 Выберите точки — по ним вы будете получать уведомления о новых сообщениях от клиентов. "
+        "Без подписки уведомления не приходят.",
+        reply_markup=kb,
+    )
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_POINT}_mysub"))
+async def cb_my_point_toggle(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    parts = payload.split(":")
+    mode = parts[0]
+
+    # user_id is always the caller, never trusted from the callback payload —
+    # this handler must only ever be able to change the caller's own
+    # subscriptions (unlike admin_router's "sub" mode, which acts on behalf
+    # of an arbitrary target user and is gated by RoleAtLeast(admin)).
+    user_id = callback.from_user.id
+
+    if mode == "mysubdone":
+        await callback.message.answer("Готово.")
+        return
+
+    point_id = int(parts[2])
+    current = {p.id for p in await database.get_user_points(user_id)}
+    if point_id in current:
+        await database.unsubscribe_user_from_point(user_id, point_id)
+        current.discard(point_id)
+    else:
+        await database.subscribe_user_to_point(user_id, point_id)
+        current.add(point_id)
+    all_points = await database.list_points()
+    await callback.message.edit_reply_markup(
+        reply_markup=keyboards.point_multiselect_kb(all_points, current, "mysub", key=str(user_id))
+    )
+
+
 @menu_router.message(F.text == constants.BTN_MY_TEMPLATES, StateFilter("*"), RoleAtLeast(constants.MANAGER))
 async def show_my_templates(message: Message) -> None:
     user = await database.get_user(message.from_user.id)
@@ -903,7 +949,23 @@ async def cb_admin_point_edit(callback: CallbackQuery) -> None:
     if point is None:
         return
     coords = await database.list_point_coordinates(point_id)
-    lines = [f"🏢 {point.name}", f"Адрес: {point.address or '—'}", f"Часы: {point.working_hours or '—'}", f"Координат: {len(coords)}"]
+    lines = [f"🏢 {point.name}", f"Адрес: {point.address or '—'}", f"Часы: {point.working_hours or '—'}"]
+    if coords:
+        # Many raw rows can share nearly the same spot (repeated syncs of
+        # the same ad) — collapse to distinct clusters (~15m) so the admin
+        # sees actual identifiable locations, not a meaningless count.
+        unique = []
+        for c in coords:
+            if not any(utils.haversine_distance_m(c.lat, c.lon, u.lat, u.lon) <= 15.0 for u in unique):
+                unique.append(c)
+            if len(unique) >= 5:
+                break
+        lines.append(f"\nКоординаты ({len(coords)} меток, {len(unique)} уникальных мест):")
+        for c in unique:
+            maps_url = f"https://maps.google.com/?q={c.lat:.6f},{c.lon:.6f}"
+            lines.append(f'📍 <a href="{maps_url}">{c.lat:.6f}, {c.lon:.6f}</a>')
+    else:
+        lines.append("Координат: нет")
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"adm_pointrename_{point_id}"))
     builder.row(InlineKeyboardButton(

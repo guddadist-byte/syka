@@ -28,7 +28,7 @@ def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
         KeyboardButton(text=constants.BTN_UNREAD),
         KeyboardButton(text=constants.BTN_RECENT),
     )
-    builder.row(KeyboardButton(text=constants.BTN_PROFILE))
+    builder.row(KeyboardButton(text=constants.BTN_PROFILE), KeyboardButton(text=constants.BTN_MY_POINTS))
     if role == constants.MANAGER:
         builder.row(KeyboardButton(text=constants.BTN_MY_TEMPLATES))
     if constants.ROLE_ORDER.get(role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
@@ -184,7 +184,10 @@ def role_select_kb(user_id: int, allow_admin_roles: bool) -> InlineKeyboardMarku
 
 
 def point_multiselect_kb(points: list[Point], selected: set[int], mode: str, key: str) -> InlineKeyboardMarkup:
-    """mode: 'sub' (multi, toggling, with a Done button) or 'single' (pick one, confirms immediately)."""
+    """mode: 'sub' (admin assigns points to another user), 'mysub' (a user
+    manages their own subscriptions — see cb_my_point_toggle), or 'single'
+    (pick one, confirms immediately). 'sub'/'mysub' are both multi-select
+    with a Done button."""
     builder = InlineKeyboardBuilder()
     for point in points:
         mark = "✅ " if point.id in selected else ""
@@ -194,8 +197,10 @@ def point_multiselect_kb(points: list[Point], selected: set[int], mode: str, key
                 callback_data=f"{constants.PREFIX_POINT}_{mode}:{key}:{point.id}",
             )
         )
-    if mode == "sub":
-        builder.row(InlineKeyboardButton(text="✅ Готово", callback_data=f"{constants.PREFIX_POINT}_subdone:{key}"))
+    if mode in ("sub", "mysub"):
+        builder.row(
+            InlineKeyboardButton(text="✅ Готово", callback_data=f"{constants.PREFIX_POINT}_{mode}done:{key}")
+        )
     return builder.as_markup()
 
 
