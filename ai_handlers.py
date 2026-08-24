@@ -28,25 +28,59 @@ ai_router.callback_query.filter(ApprovedUser())
 
 
 @ai_router.callback_query(F.data.startswith(f"{constants.PREFIX_AIDRAFT}_"))
-async def generate_ai_draft(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.answer("Генерирую черновик…")
+async def ai_draft_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
     _, short_id = callback.data.split("_", 1)
+    await callback.message.answer(
+        "Как сформировать черновик?", reply_markup=keyboards.ai_draft_choice_kb(short_id)
+    )
+
+
+async def _generate_and_reply(target: Message, state: FSMContext, short_id: str,
+                               prompt_override: str | None = None) -> None:
     chat = await bot_cache.resolve_chat(short_id)
     if chat is None:
         return
     if chat.point_id is None:
-        await callback.message.answer("У чата не определена точка, ИИ-ответ недоступен.")
+        await target.answer("У чата не определена точка, ИИ-ответ недоступен.")
         return
     point = await database.get_point(chat.point_id)
     if point is None:
         return
     try:
-        draft, flagged = await guardrail.guarded_generate(list(chat.messages), point)
+        draft, flagged = await guardrail.guarded_generate(list(chat.messages), point, prompt_override=prompt_override)
     except ai_client.AIClientError:
-        await callback.message.answer("⚠️ Не удалось получить ответ от ИИ. Попробуйте позже.")
+        await target.answer("⚠️ Не удалось получить ответ от ИИ. Попробуйте позже.")
         return
     await state.update_data(chat_short_id=short_id, ai_draft=draft)
-    await callback.message.answer(draft, reply_markup=keyboards.ai_draft_kb(short_id, allow_send=not flagged))
+    await target.answer(draft, reply_markup=keyboards.ai_draft_kb(short_id, allow_send=not flagged))
+
+
+@ai_router.callback_query(F.data.startswith(f"{constants.PREFIX_AIDRAFT_AUTO}_"))
+async def generate_ai_draft_auto(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer("Генерирую черновик…")
+    _, short_id = callback.data.split("_", 1)
+    await _generate_and_reply(callback.message, state, short_id)
+
+
+@ai_router.callback_query(F.data.startswith(f"{constants.PREFIX_AIDRAFT_PROMPT}_"))
+async def ai_draft_prompt_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, short_id = callback.data.split("_", 1)
+    await state.update_data(ai_prompt_short_id=short_id)
+    await state.set_state(AIStates.waiting_for_custom_prompt)
+    await callback.message.answer("Введите промпт для ИИ (например: «уточни, что доставка не работает»):")
+
+
+@ai_router.message(AIStates.waiting_for_custom_prompt, SafeFreeText())
+async def receive_ai_custom_prompt(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    short_id = data.get("ai_prompt_short_id")
+    if not short_id:
+        await state.clear()
+        return
+    await message.answer("Генерирую черновик…")
+    await _generate_and_reply(message, state, short_id, prompt_override=message.text)
 
 
 @ai_router.callback_query(F.data.startswith(f"{constants.PREFIX_AISEND}_"))

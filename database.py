@@ -345,6 +345,15 @@ async def update_point_details(point_id: int, address: str | None = None, workin
         await _execute("UPDATE points SET working_hours = ? WHERE id = ?", (working_hours, point_id))
 
 
+async def get_point_by_code(code: str) -> models.Point | None:
+    row = await _fetchone("SELECT * FROM points WHERE code = ? COLLATE NOCASE", (code,))
+    return models.Point.from_row(row) if row else None
+
+
+async def set_point_code(point_id: int, code: str | None) -> None:
+    await _execute("UPDATE points SET code = ? WHERE id = ?", (code, point_id))
+
+
 async def soft_delete_point(point_id: int) -> None:
     await _execute("UPDATE points SET is_active = 0 WHERE id = ?", (point_id,))
 

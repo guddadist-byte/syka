@@ -99,6 +99,17 @@ def sent_message_kb(msg_ref: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def ai_draft_choice_kb(short_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(
+        text="🤖 Сгенерировать по диалогу", callback_data=f"{constants.PREFIX_AIDRAFT_AUTO}_{short_id}"
+    ))
+    builder.row(InlineKeyboardButton(
+        text="✏️ Свой промпт", callback_data=f"{constants.PREFIX_AIDRAFT_PROMPT}_{short_id}"
+    ))
+    return builder.as_markup()
+
+
 def ai_draft_kb(short_id: str, allow_send: bool) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if allow_send:
@@ -129,6 +140,22 @@ def template_list_kb(templates: list[Template], short_id: str) -> InlineKeyboard
     return builder.as_markup()
 
 
+def template_manage_kb(templates: list[Template]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for template in templates:
+        icon = "🧠" if template.kind == constants.TEMPLATE_AI_PROMPT else "📝"
+        builder.row(InlineKeyboardButton(text=f"{icon} {template.title}", callback_data=f"tplmanage_{template.id}"))
+    builder.row(InlineKeyboardButton(text="➕ Текстовый шаблон", callback_data="tplnew_text"))
+    builder.row(InlineKeyboardButton(text="➕ AI-промпт шаблон", callback_data="tplnew_ai_prompt"))
+    return builder.as_markup()
+
+
+def template_detail_kb(template_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🗑 Удалить шаблон", callback_data=f"tpldel_{template_id}"))
+    return builder.as_markup()
+
+
 # --- admin panel / leadership menu -----------------------------------------
 
 
@@ -143,6 +170,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="🧠 Настройки ИИ", callback_data="adm_ai"))
     builder.row(InlineKeyboardButton(text="🌐 Прокси", callback_data="adm_proxy"))
     builder.row(InlineKeyboardButton(text="🏢 Настройки подразделений", callback_data="adm_points"))
+    builder.row(InlineKeyboardButton(text="📥 Массово адреса/часы", callback_data="adm_bulkpoints"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
     builder.row(InlineKeyboardButton(text="🔍 Проверка близких точек", callback_data="adm_pointconflicts"))
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))

@@ -373,12 +373,31 @@ async def show_my_templates(message: Message) -> None:
         await message.answer("У вас пока не назначена ответственная точка.")
         return
     templates = await database.list_templates(user.responsible_point_id)
-    lines = ["📋 Ваши шаблоны:"]
-    lines += [f"{'🧠' if t.kind == constants.TEMPLATE_AI_PROMPT else '📝'} {t.title}" for t in templates] or ["(пока нет)"]
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="➕ Текстовый шаблон", callback_data="tplnew_text"))
-    builder.row(InlineKeyboardButton(text="➕ AI-промпт шаблон", callback_data="tplnew_ai_prompt"))
-    await message.answer("\n".join(lines), reply_markup=builder.as_markup())
+    text = "📋 Ваши шаблоны (нажмите, чтобы посмотреть/удалить):" if templates else "📋 Шаблонов пока нет."
+    await message.answer(text, reply_markup=keyboards.template_manage_kb(templates))
+
+
+@template_router.callback_query(F.data.startswith("tplmanage_"), RoleAtLeast(constants.MANAGER))
+async def cb_template_manage_view(callback: CallbackQuery) -> None:
+    await callback.answer()
+    template_id = int(callback.data.rsplit("_", 1)[1])
+    template = await database.get_template(template_id)
+    if template is None:
+        await callback.message.answer("Шаблон не найден.")
+        return
+    kind_label = "🧠 AI-промпт" if template.kind == constants.TEMPLATE_AI_PROMPT else "📝 Текст"
+    await callback.message.answer(
+        f"{kind_label} «{template.title}»:\n\n{template.body}",
+        reply_markup=keyboards.template_detail_kb(template.id),
+    )
+
+
+@template_router.callback_query(F.data.startswith("tpldel_"), RoleAtLeast(constants.MANAGER))
+async def cb_template_delete(callback: CallbackQuery) -> None:
+    await callback.answer()
+    template_id = int(callback.data.rsplit("_", 1)[1])
+    await database.deactivate_template(template_id)
+    await callback.message.edit_text("🗑 Шаблон удалён.")
 
 
 @menu_router.message(F.text == constants.BTN_ADMIN_PANEL, StateFilter("*"), RoleAtLeast(constants.ADMIN))
@@ -655,6 +674,21 @@ async def _send_photos(anchor: Message, state: FSMContext, messages: list[Messag
 # --- templates ---------------------------------------------------------------
 
 
+async def _apply_point_placeholders(text: str) -> str:
+    """Substitutes !<CODE>А / !<CODE>В in template text with that point's
+    address / working hours (e.g. "!ТКЧА" -> the ТКЧ point's address).
+    Codes are set via the bulk address/hours import or a point's "🔤 Код".
+    """
+    if "!" not in text:
+        return text
+    for point in await database.list_points(active_only=False):
+        if not point.code:
+            continue
+        text = text.replace(f"!{point.code}А", point.address or "")
+        text = text.replace(f"!{point.code}В", point.working_hours or "")
+    return text
+
+
 @template_router.callback_query(F.data.startswith(f"{constants.PREFIX_TPL}_"))
 async def cb_template_action(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -668,14 +702,15 @@ async def cb_template_action(callback: CallbackQuery, state: FSMContext) -> None
             return
 
         if template.kind == constants.TEMPLATE_TEXT:
-            draft, allow_send = template.body, True
+            draft, allow_send = await _apply_point_placeholders(template.body), True
         else:
             point = await database.get_point(chat.point_id) if chat.point_id else None
             if point is None:
                 await callback.message.answer("У чата не определена точка, AI-шаблон недоступен.")
                 return
+            prompt_override = await _apply_point_placeholders(template.body)
             try:
-                draft, flagged = await guardrail.guarded_generate(list(chat.messages), point, prompt_override=template.body)
+                draft, flagged = await guardrail.guarded_generate(list(chat.messages), point, prompt_override=prompt_override)
             except ai_client.AIClientError:
                 await callback.message.answer("⚠️ Не удалось получить ответ от ИИ.")
                 return
@@ -1207,7 +1242,10 @@ async def cb_admin_point_edit(callback: CallbackQuery) -> None:
     if point is None:
         return
     coords = await database.list_point_coordinates(point_id)
-    lines = [f"🏢 {point.name}", f"Адрес: {point.address or '—'}", f"Часы: {point.working_hours or '—'}"]
+    lines = [
+        f"🏢 {point.name}", f"Код: {point.code or '—'}",
+        f"Адрес: {point.address or '—'}", f"Часы: {point.working_hours or '—'}",
+    ]
     if coords:
         # Many raw rows can share nearly the same spot (repeated syncs of
         # the same ad) — collapse to distinct clusters (~15m) so the admin
@@ -1226,6 +1264,7 @@ async def cb_admin_point_edit(callback: CallbackQuery) -> None:
         lines.append("Координат: нет")
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"adm_pointrename_{point_id}"))
+    builder.row(InlineKeyboardButton(text="🔤 Изменить код", callback_data=f"adm_pointcode_{point_id}"))
     builder.row(InlineKeyboardButton(text="📍 Изменить адрес", callback_data=f"adm_pointaddr_{point_id}"))
     builder.row(InlineKeyboardButton(text="🕒 Изменить часы работы", callback_data=f"adm_pointhours_{point_id}"))
     builder.row(InlineKeyboardButton(
@@ -1304,6 +1343,94 @@ async def admin_point_hours_finish(message: Message, state: FSMContext) -> None:
         await database.update_point_details(point_id, working_hours=message.text.strip())
     await state.clear()
     await message.answer("✅ Часы работы обновлены.")
+
+
+@admin_router.callback_query(F.data.startswith("adm_pointcode_"))
+async def cb_admin_point_code_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    point_id = int(callback.data.rsplit("_", 1)[1])
+    await state.set_state(AdminStates.waiting_for_point_code)
+    await state.update_data(editing_point_id=point_id)
+    await callback.message.answer(
+        "Введите короткий код точки (например, ТКЧ) — используется в массовом "
+        "заполнении и в шаблонах (!ТКЧА, !ТКЧВ):",
+        reply_markup=keyboards.cancel_kb(),
+    )
+
+
+@admin_router.message(AdminStates.waiting_for_point_code, SafeFreeText())
+async def admin_point_code_finish(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    point_id = data.get("editing_point_id")
+    if point_id:
+        await database.set_point_code(point_id, message.text.strip().upper())
+    await state.clear()
+    await message.answer("✅ Код точки обновлён.")
+
+
+@admin_router.callback_query(F.data == "adm_bulkpoints")
+async def cb_admin_bulk_points_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_bulk_points_import)
+    await callback.message.answer(
+        "Пришлите список точек, по одной на строку, в формате:\n"
+        "<code>КОД Город ул. Адрес, дом Часы_работы</code>\n\n"
+        "Например:\n"
+        "<code>ТКЧ Ростов-на-Дону ул. Текучева 141а 8:00-20:00</code>\n\n"
+        "Код должен быть первым словом, часы работы (или «Круглосуточно») — последним. "
+        "Совпадение точки ищется по коду, а если код ещё не задан — по названию точки.",
+        reply_markup=keyboards.cancel_kb(),
+    )
+
+
+@admin_router.message(AdminStates.waiting_for_bulk_points_import, SafeFreeText())
+async def admin_bulk_points_finish(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    all_points = await database.list_points(active_only=False)
+
+    updated: list[str] = []
+    not_found: list[str] = []
+    for raw_line in message.text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            not_found.append(f"{line} (не смог разобрать строку)")
+            continue
+        code = parts[0].upper()
+        hours = parts[-1]
+        address = " ".join(parts[1:-1])
+
+        point = await database.get_point_by_code(code)
+        if point is None:
+            # Fall back to matching by name — first run before any point has
+            # a code assigned yet (e.g. points named exactly "ТКЧ" already).
+            code_lower = code.lower()
+            candidates = [
+                p for p in all_points
+                if p.name.strip().lower() == code_lower or code_lower in p.name.lower().split()
+            ]
+            if len(candidates) == 1:
+                point = candidates[0]
+            elif len(candidates) > 1:
+                not_found.append(f"{code} — несколько точек подходят по названию, разберите вручную")
+                continue
+
+        if point is None:
+            not_found.append(f"{code} — точка не найдена (ни по коду, ни по названию)")
+            continue
+
+        await database.update_point_details(point.id, address=address, working_hours=hours)
+        await database.set_point_code(point.id, code)
+        updated.append(f"{code} → «{point.name}»")
+
+    lines = [f"✅ Обновлено: {len(updated)}"]
+    lines += [f"  {line}" for line in updated]
+    if not_found:
+        lines.append(f"\n⚠️ Не разобрано/не найдено: {len(not_found)}")
+        lines += [f"  {line}" for line in not_found]
+    await message.answer("\n".join(lines))
 
 
 @admin_router.callback_query(F.data == "adm_syncpoints")

@@ -12,6 +12,7 @@ class ReplyStates(StatesGroup):
 
 class AIStates(StatesGroup):
     waiting_for_edit = State()
+    waiting_for_custom_prompt = State()
 
 
 class RegistrationStates(StatesGroup):
@@ -25,8 +26,10 @@ class AdminStates(StatesGroup):
     waiting_for_point_name = State()
     waiting_for_point_address = State()
     waiting_for_point_hours = State()
+    waiting_for_point_code = State()
     waiting_for_point_coordinate = State()
     waiting_for_responsible_point = State()
+    waiting_for_bulk_points_import = State()
 
     # Avito accounts
     waiting_for_avito_name = State()

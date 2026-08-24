@@ -47,6 +47,7 @@ class Point:
     name_is_custom: int
     is_active: int
     created_at: str
+    code: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Point":
