@@ -253,8 +253,10 @@ def point_multiselect_kb(points: list[Point], selected: set[int], mode: str, key
             )
         )
     if mode == "mysub":
+        all_selected = bool(points) and all(p.id in selected for p in points)
+        toggle_all_text = "⬜ Отписаться от всех" if all_selected else "☑️ Подписаться на все"
         builder.row(
-            InlineKeyboardButton(text="☑️ Подписаться на все", callback_data=f"{constants.PREFIX_POINT}_mysuball:{key}")
+            InlineKeyboardButton(text=toggle_all_text, callback_data=f"{constants.PREFIX_POINT}_mysuball:{key}")
         )
     if mode in ("sub", "mysub"):
         builder.row(

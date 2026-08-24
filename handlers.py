@@ -355,9 +355,15 @@ async def cb_my_point_toggle(callback: CallbackQuery) -> None:
     all_points = await database.list_points()
 
     if mode == "mysuball":
-        for point in all_points:
-            await database.subscribe_user_to_point(user_id, point.id)
-        current = {p.id for p in all_points}
+        already_all = {p.id for p in await database.get_user_points(user_id)} == {p.id for p in all_points}
+        if already_all:
+            for point in all_points:
+                await database.unsubscribe_user_from_point(user_id, point.id)
+            current = set()
+        else:
+            for point in all_points:
+                await database.subscribe_user_to_point(user_id, point.id)
+            current = {p.id for p in all_points}
     else:
         point_id = int(parts[2])
         current = {p.id for p in await database.get_user_points(user_id)}
