@@ -70,9 +70,11 @@ async def _show_main_menu(message: Message) -> None:
     await message.answer("🏠 Главное меню", reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role))
 
 
-async def _point_ids_for_user(user) -> set[int] | None:
-    if user.role == constants.DIRECTOR:
-        return None
+async def _point_ids_for_user(user) -> set[int]:
+    # Strictly by subscription for every role, including Director — same
+    # rule as push notifications (see tasks.py._notify_subscribers): no
+    # subscription to a point means it doesn't show up here either. Use
+    # "📍 Мои точки" to subscribe; there is no more automatic "see everything".
     if user.role == constants.MANAGER and user.responsible_point_id:
         return {user.responsible_point_id}
     points = await database.get_user_points(user.telegram_id)
@@ -87,10 +89,10 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
     elif chat.item_title:
         lines.append(f"📦 {html.escape(chat.item_title)}")
     lines.append("")
-    for m in list(chat.messages)[-10:]:
-        prefix = "👤" if m.direction == "in" else "🧑‍💼"
+    for m in list(chat.messages)[-30:]:
+        speaker = client_name if m.direction == "in" else "Я"
         text = html.escape(m.text) if m.text else "(фото)"
-        lines.append(f"{prefix} {text}")
+        lines.append(f"{speaker}: {text}")
     if not chat.messages:
         lines.append("(сообщений пока нет)")
 

@@ -89,16 +89,17 @@ async def get_short_id(chat_id: str) -> str:
 async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: int,
                        client_name: str, item_id: str | None = None,
                        item_title: str | None = None, item_url: str | None = None,
-                       initial_unread_count: int = 0) -> CachedChat:
+                       initial_unread_count: int = 0,
+                       initial_messages: list[CachedMessage] | None = None) -> CachedChat:
     async with _lock:
         chat = _chats.get(chat_id)
         if chat is None:
-            # initial_unread_count seeds a freshly-created (post-restart)
-            # cache entry from the durable DB count — without this, a chat
-            # whose only unread message was already persisted before the
-            # restart would come back with unread_count=0 here (add_message
-            # is never called again for a message tasks.py already knows),
-            # even though it's genuinely still unread in the DB.
+            # initial_unread_count/initial_messages seed a freshly-created
+            # (post-restart) cache entry from durable DB state — without
+            # this, a chat whose messages were all persisted before the
+            # restart would come back empty/unread=0 here (add_message is
+            # never called again for a message tasks.py already knows),
+            # even though the DB has the real history and unread count.
             short_id = _make_short_id(chat_id)
             chat = CachedChat(
                 chat_id=chat_id,
@@ -111,6 +112,9 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 item_url=item_url,
                 unread_count=initial_unread_count,
             )
+            if initial_messages:
+                chat.messages.extend(initial_messages)
+                chat.last_message_at = chat.messages[-1].created_at
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:
