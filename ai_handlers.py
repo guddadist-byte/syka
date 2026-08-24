@@ -95,6 +95,13 @@ async def send_ai_draft(callback: CallbackQuery, state: FSMContext) -> None:
     )
     await database.mark_chat_replied(chat.chat_id, callback.from_user.id)
     await database.increment_rating(callback.from_user.id)
+    # unread_count is synced from Avito's own count on every poll (see
+    # tasks.py), so this has to be mirrored to Avito or the next poll
+    # would overwrite the local zero right back.
+    try:
+        await client.mark_chat_read(chat.chat_id)
+    except avito_client.AvitoAPIError:
+        pass
 
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, sent.message_id or "")
     await state.clear()

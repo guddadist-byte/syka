@@ -113,6 +113,16 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
     )
 
 
+async def _safe_mark_chat_read(client: "avito_client.AvitoClient", chat_id: str) -> None:
+    # unread_count is synced from Avito's own count on every poll (see
+    # tasks.py), so any local zeroing (mark-read, a sent reply) has to be
+    # mirrored to Avito too, or the next poll overwrites it right back.
+    try:
+        await client.mark_chat_read(chat_id)
+    except avito_client.AvitoAPIError:
+        pass
+
+
 async def _restart_for_proxy_change(message: Message) -> None:
     await message.answer("⚠️ Настройки прокси сохранены, бот перезапускается...")
     raise SystemExit(0)
@@ -378,6 +388,9 @@ async def cb_mark_read(callback: CallbackQuery) -> None:
     if chat is not None:
         await bot_cache.mark_read(chat.chat_id)
         await database.set_chat_unread_count(chat.chat_id, 0)
+        client = avito_client.get_pool().get(chat.avito_account_id)
+        if client is not None:
+            await _safe_mark_chat_read(client, chat.chat_id)
     await callback.message.answer("✅ Отмечено как прочитанное.")
 
 
@@ -526,6 +539,7 @@ async def receive_reply_text(message: Message, state: FSMContext) -> None:
     )
     await database.mark_chat_replied(chat.chat_id, message.from_user.id)
     await database.increment_rating(message.from_user.id)
+    await _safe_mark_chat_read(client, chat.chat_id)
 
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, sent.message_id or "")
     await state.clear()
@@ -605,6 +619,7 @@ async def _send_photos(anchor: Message, state: FSMContext, messages: list[Messag
     await bot_cache.mark_replied(chat.chat_id, anchor.from_user.id)
     await database.mark_chat_replied(chat.chat_id, anchor.from_user.id)
     await database.increment_rating(anchor.from_user.id)
+    await _safe_mark_chat_read(client, chat.chat_id)
     await state.clear()
 
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, last_avito_message_id)

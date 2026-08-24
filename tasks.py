@@ -66,12 +66,10 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
 
     # Read durable state before touching bot_cache — if this chat isn't in
     # the in-memory cache yet (e.g. right after a restart), upsert_chat
-    # seeds its unread_count and message history from this instead of
-    # starting empty. The extra DB round trips only happen once per chat
-    # per process lifetime (only when it's not cached yet), not every poll.
+    # seeds its message history from this instead of starting empty. The
+    # extra DB round trip only happens once per chat per process lifetime
+    # (only when it's not cached yet), not every poll.
     was_cached = await bot_cache.get_chat(chat.chat_id) is not None
-    existing_summary = await database.get_chat_summary(chat.chat_id)
-    initial_unread = existing_summary.unread_count if existing_summary else 0
 
     initial_messages: list[bot_cache.CachedMessage] = []
     if not was_cached:
@@ -86,13 +84,19 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
                 )
             )
 
+    # chat.unread_count comes straight from Avito's own chat-list "unread"
+    # field — trusted as-is, synced on every poll. A locally-accumulated
+    # counter (the old design) only ever reset via a bot-driven action, so
+    # it drifted permanently out of sync for any chat a staff member
+    # replied to directly in Avito's own app/website instead of the bot.
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
         item_title=chat.item_title, item_url=chat.item_url,
-        initial_unread_count=initial_unread,
+        unread_count=chat.unread_count,
         initial_messages=initial_messages,
     )
+    await database.set_chat_unread_count(chat.chat_id, chat.unread_count)
     await database.upsert_chat_summary(
         chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
         client_name=chat.client_name,
@@ -138,8 +142,6 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         if message.direction != "in":
             continue
 
-        live_chat = await bot_cache.get_chat(chat.chat_id)
-        await database.set_chat_unread_count(chat.chat_id, live_chat.unread_count if live_chat else 1)
         await database.upsert_chat_summary(
             chat.chat_id, avito_account_id=account.id, point_id=point_id,
             last_message_at=sent_at_str, last_message_text=message.text, last_message_dir="in",
