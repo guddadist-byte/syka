@@ -90,7 +90,7 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
         lines.append(f"📦 {html.escape(chat.item_title)}")
     lines.append("")
     for m in list(chat.messages)[-30:]:
-        speaker = client_name if m.direction == "in" else "Я"
+        speaker = f"👤 <b>{client_name}</b>" if m.direction == "in" else "🧑‍💼 <b>Я</b>"
         text = html.escape(m.text) if m.text else "(фото)"
         lines.append(f"{speaker}: {text}")
     if not chat.messages:
