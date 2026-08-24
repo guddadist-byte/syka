@@ -31,6 +31,7 @@ class User:
     approved_by: int | None
     last_seen_at: str | None
     last_start_at: str | None
+    trade_point_name: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "User":

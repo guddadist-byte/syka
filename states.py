@@ -17,6 +17,7 @@ class AIStates(StatesGroup):
 class RegistrationStates(StatesGroup):
     waiting_for_payment = State()
     waiting_for_full_name = State()
+    waiting_for_trade_point = State()
 
 
 class AdminStates(StatesGroup):
@@ -62,3 +63,7 @@ class AdminStates(StatesGroup):
     # Templates
     waiting_for_template_title = State()
     waiting_for_template_body = State()
+
+    # User editing (Все пользователи)
+    waiting_for_user_fullname = State()
+    waiting_for_user_trade_point = State()

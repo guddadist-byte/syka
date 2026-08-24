@@ -32,7 +32,7 @@ def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
     if role == constants.MANAGER:
         builder.row(KeyboardButton(text=constants.BTN_MY_TEMPLATES))
     if constants.ROLE_ORDER.get(role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
-        builder.row(KeyboardButton(text=constants.BTN_ADMIN_PANEL))
+        builder.row(KeyboardButton(text=constants.BTN_LEADERSHIP), KeyboardButton(text=constants.BTN_ADMIN_PANEL))
     return builder.as_markup(resize_keyboard=True)
 
 
@@ -134,7 +134,9 @@ def template_list_kb(templates: list[Template], short_id: str) -> InlineKeyboard
 
 def admin_panel_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="👔 Меню руководителя", callback_data="adm_leadership"))
+    builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
+    builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
+    builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="🔑 Avito API", callback_data="adm_avito"))
     builder.row(InlineKeyboardButton(text="🧠 Настройки ИИ", callback_data="adm_ai"))
     builder.row(InlineKeyboardButton(text="🌐 Прокси", callback_data="adm_proxy"))
@@ -149,6 +151,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
 def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
+    builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
     return builder.as_markup()
@@ -159,12 +162,21 @@ def user_management_kb(users: list[User]) -> InlineKeyboardMarkup:
     for user in users:
         label = user.full_name or user.username or str(user.telegram_id)
         role_label = ROLE_LABELS.get(user.role, user.role)
+        tt_suffix = f" · {user.trade_point_name}" if user.trade_point_name else ""
         builder.row(
             InlineKeyboardButton(
-                text=f"✏️ {label} ({role_label})", callback_data=f"adm_useredit_{user.telegram_id}"
+                text=f"✏️ {label} ({role_label}){tt_suffix}", callback_data=f"adm_useredit_{user.telegram_id}"
             ),
             InlineKeyboardButton(text="🚫 Уволить", callback_data=f"{constants.PREFIX_BLK}_{user.telegram_id}"),
         )
+    return builder.as_markup()
+
+
+def user_edit_menu_kb(user_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🎭 Изменить роль", callback_data=f"adm_urole_{user_id}"))
+    builder.row(InlineKeyboardButton(text="✏️ Изменить ФИО", callback_data=f"adm_uname_{user_id}"))
+    builder.row(InlineKeyboardButton(text="🏢 Изменить торговую точку", callback_data=f"adm_utrade_{user_id}"))
     return builder.as_markup()
 
 

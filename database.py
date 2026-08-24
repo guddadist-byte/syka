@@ -202,6 +202,14 @@ async def list_all_users() -> list[models.User]:
     return [models.User.from_row(r) for r in rows]
 
 
+async def update_user_full_name(telegram_id: int, full_name: str) -> None:
+    await _execute("UPDATE users SET full_name = ? WHERE telegram_id = ?", (full_name, telegram_id))
+
+
+async def update_user_trade_point(telegram_id: int, trade_point_name: str) -> None:
+    await _execute("UPDATE users SET trade_point_name = ? WHERE telegram_id = ?", (trade_point_name, telegram_id))
+
+
 async def mark_user_unreachable(telegram_id: int) -> None:
     await _execute("UPDATE users SET blocked_bot = 1 WHERE telegram_id = ?", (telegram_id,))
 

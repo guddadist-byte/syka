@@ -211,26 +211,44 @@ async def process_successful_payment(message: Message, state: FSMContext) -> Non
     await message.answer("Оплата получена. Как к вам обращаться? Введите ФИО для заявки на доступ.")
 
 
-async def _notify_admins_new_request(bot, telegram_id: int, full_name: str) -> None:
+async def _notify_admins_new_request(bot, telegram_id: int, full_name: str, trade_point_name: str | None = None) -> None:
     payment = await database.get_payment_for_user(telegram_id)
     kb = keyboards.access_decision_kb(telegram_id, has_unrefunded_payment=payment is not None)
-    text = f"🆕 Заявка на доступ\n\n{full_name} (id {telegram_id})"
+    tt_line = f"\nТТ: {trade_point_name}" if trade_point_name else ""
+    text = f"🆕 Заявка на доступ\n\n{full_name} (id {telegram_id}){tt_line}"
     for admin in await database.list_admins_and_directors():
         try:
             await bot.send_message(admin.telegram_id, text, reply_markup=kb)
         except TelegramForbiddenError:
             await database.mark_user_unreachable(admin.telegram_id)
+        except Exception:
+            # Previously any other failure here (bad markup, a transient
+            # API error, ...) silently broke the whole notify loop with no
+            # trace — admins would just never find out a request existed.
+            # Logged and skipped now; the request is also always visible
+            # via "📋 Заявки на вступление" regardless of delivery.
+            logger.exception("_notify_admins_new_request: failed to notify %s", admin.telegram_id)
 
 
 @registration_router.message(RegistrationStates.waiting_for_full_name, SafeFreeText())
 async def process_full_name(message: Message, state: FSMContext) -> None:
+    await state.update_data(full_name=message.text.strip())
+    await state.set_state(RegistrationStates.waiting_for_trade_point)
+    await message.answer("Укажите название торговой точки, на которой вы работаете:")
+
+
+@registration_router.message(RegistrationStates.waiting_for_trade_point, SafeFreeText())
+async def process_trade_point(message: Message, state: FSMContext) -> None:
     telegram_id = message.from_user.id
-    full_name = message.text.strip()
+    data = await state.get_data()
+    full_name = (data.get("full_name") or "").strip()
+    trade_point_name = message.text.strip()
     await database.create_or_update_user(telegram_id, message.from_user.username, full_name, message.from_user.last_name)
+    await database.update_user_trade_point(telegram_id, trade_point_name)
     await database.log_access_request(telegram_id, "requested", None, note=full_name)
     await state.clear()
     await message.answer("Заявка отправлена, ожидайте решения администратора.")
-    await _notify_admins_new_request(message.bot, telegram_id, full_name)
+    await _notify_admins_new_request(message.bot, telegram_id, full_name, trade_point_name)
 
 
 # --- main menu (State Guard layer 1 continued: StateFilter("*")) -----------
@@ -286,6 +304,8 @@ async def show_profile(message: Message) -> None:
         f"👤 {user.full_name or user.username or user.telegram_id}",
         f"Роль: {constants.ROLE_LABELS[user.role]}",
     ]
+    if user.trade_point_name:
+        lines.append(f"Торговая точка: {user.trade_point_name}")
     if user.role == constants.MANAGER and user.responsible_point_id:
         point = await database.get_point(user.responsible_point_id)
         if point:
@@ -364,6 +384,11 @@ async def show_my_templates(message: Message) -> None:
 @menu_router.message(F.text == constants.BTN_ADMIN_PANEL, StateFilter("*"), RoleAtLeast(constants.ADMIN))
 async def show_admin_panel(message: Message) -> None:
     await message.answer("⚙️ Настройки", reply_markup=keyboards.admin_panel_kb())
+
+
+@menu_router.message(F.text == constants.BTN_LEADERSHIP, StateFilter("*"), RoleAtLeast(constants.ADMIN))
+async def show_leadership_menu(message: Message) -> None:
+    await message.answer("👔 Меню руководителя", reply_markup=keyboards.leadership_menu_kb())
 
 
 # --- CRM: chat detail, reply, delete, reassign, profile rating -------------
@@ -716,12 +741,6 @@ async def template_body(message: Message, state: FSMContext) -> None:
 # --- admin: leadership menu / users / access decisions ----------------------
 
 
-@admin_router.callback_query(F.data == "adm_leadership")
-async def cb_admin_leadership(callback: CallbackQuery) -> None:
-    await callback.answer()
-    await callback.message.answer("👔 Меню руководителя", reply_markup=keyboards.leadership_menu_kb())
-
-
 @admin_router.callback_query(F.data == "adm_users")
 async def cb_admin_users(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -729,13 +748,74 @@ async def cb_admin_users(callback: CallbackQuery) -> None:
     await callback.message.answer("👥 Все пользователи:", reply_markup=keyboards.user_management_kb(users))
 
 
+@admin_router.callback_query(F.data == "adm_requests")
+async def cb_admin_requests(callback: CallbackQuery) -> None:
+    await callback.answer()
+    pending = await database.list_pending_users()
+    if not pending:
+        await callback.message.answer("📋 Заявок на вступление нет.")
+        return
+    for user in pending:
+        payment = await database.get_payment_for_user(user.telegram_id)
+        kb = keyboards.access_decision_kb(user.telegram_id, has_unrefunded_payment=payment is not None)
+        label = user.full_name or user.username or str(user.telegram_id)
+        tt_line = f"\nТТ: {user.trade_point_name}" if user.trade_point_name else ""
+        text = f"🆕 Заявка на доступ\n\n{label} (id {user.telegram_id}){tt_line}"
+        await callback.message.answer(text, reply_markup=kb)
+
+
 @admin_router.callback_query(F.data.startswith("adm_useredit_"))
 async def cb_admin_user_edit(callback: CallbackQuery) -> None:
+    await callback.answer()
+    target_id = int(callback.data.rsplit("_", 1)[1])
+    await callback.message.answer("Что изменить?", reply_markup=keyboards.user_edit_menu_kb(target_id))
+
+
+@admin_router.callback_query(F.data.startswith("adm_urole_"))
+async def cb_admin_user_role_start(callback: CallbackQuery) -> None:
     await callback.answer()
     target_id = int(callback.data.rsplit("_", 1)[1])
     actor = await database.get_user(callback.from_user.id)
     allow_admin_roles = bool(actor and actor.role == constants.DIRECTOR)
     await callback.message.answer("Выберите новую роль:", reply_markup=keyboards.role_select_kb(target_id, allow_admin_roles))
+
+
+@admin_router.callback_query(F.data.startswith("adm_uname_"))
+async def cb_admin_user_name_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    target_id = int(callback.data.rsplit("_", 1)[1])
+    await state.set_state(AdminStates.waiting_for_user_fullname)
+    await state.update_data(editing_user_id=target_id)
+    await callback.message.answer("Введите новое ФИО:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_user_fullname, SafeFreeText())
+async def admin_user_name_finish(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    target_id = data.get("editing_user_id")
+    if target_id:
+        await database.update_user_full_name(target_id, message.text.strip())
+    await state.clear()
+    await message.answer("✅ ФИО обновлено.")
+
+
+@admin_router.callback_query(F.data.startswith("adm_utrade_"))
+async def cb_admin_user_trade_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    target_id = int(callback.data.rsplit("_", 1)[1])
+    await state.set_state(AdminStates.waiting_for_user_trade_point)
+    await state.update_data(editing_user_id=target_id)
+    await callback.message.answer("Введите название торговой точки:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_user_trade_point, SafeFreeText())
+async def admin_user_trade_finish(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    target_id = data.get("editing_user_id")
+    if target_id:
+        await database.update_user_trade_point(target_id, message.text.strip())
+    await state.clear()
+    await message.answer("✅ Торговая точка обновлена.")
 
 
 @admin_router.callback_query(F.data.startswith("adm_setrole_"))
@@ -985,6 +1065,8 @@ async def cb_admin_point_edit(callback: CallbackQuery) -> None:
         lines.append("Координат: нет")
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="✏️ Переименовать", callback_data=f"adm_pointrename_{point_id}"))
+    builder.row(InlineKeyboardButton(text="📍 Изменить адрес", callback_data=f"adm_pointaddr_{point_id}"))
+    builder.row(InlineKeyboardButton(text="🕒 Изменить часы работы", callback_data=f"adm_pointhours_{point_id}"))
     builder.row(InlineKeyboardButton(
         text="🟢 Активировать" if not point.is_active else "🔴 Удалить (скрыть)",
         callback_data=f"adm_pointtoggle_{point_id}",
@@ -1023,6 +1105,44 @@ async def admin_point_rename_finish(message: Message, state: FSMContext) -> None
         await database.rename_point(point_id, message.text.strip())
     await state.clear()
     await message.answer("✅ Точка переименована.")
+
+
+@admin_router.callback_query(F.data.startswith("adm_pointaddr_"))
+async def cb_admin_point_address_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    point_id = int(callback.data.rsplit("_", 1)[1])
+    await state.set_state(AdminStates.waiting_for_point_address)
+    await state.update_data(editing_point_id=point_id)
+    await callback.message.answer("Введите новый адрес точки:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_point_address, SafeFreeText())
+async def admin_point_address_finish(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    point_id = data.get("editing_point_id")
+    if point_id:
+        await database.update_point_details(point_id, address=message.text.strip())
+    await state.clear()
+    await message.answer("✅ Адрес обновлён.")
+
+
+@admin_router.callback_query(F.data.startswith("adm_pointhours_"))
+async def cb_admin_point_hours_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    point_id = int(callback.data.rsplit("_", 1)[1])
+    await state.set_state(AdminStates.waiting_for_point_hours)
+    await state.update_data(editing_point_id=point_id)
+    await callback.message.answer("Введите часы работы точки (например, 10:00–20:00):", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_point_hours, SafeFreeText())
+async def admin_point_hours_finish(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    point_id = data.get("editing_point_id")
+    if point_id:
+        await database.update_point_details(point_id, working_hours=message.text.strip())
+    await state.clear()
+    await message.answer("✅ Часы работы обновлены.")
 
 
 @admin_router.callback_query(F.data == "adm_syncpoints")
