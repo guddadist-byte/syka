@@ -163,16 +163,12 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
     builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
-    builder.row(InlineKeyboardButton(text="🔓 Разблокировать по ID", callback_data="adm_unblockbyid"))
-    builder.row(InlineKeyboardButton(text="🗑 Удалить аккаунт по ID", callback_data="adm_deleteaccount"))
+    builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="🔑 Avito API", callback_data="adm_avito"))
     builder.row(InlineKeyboardButton(text="🧠 Настройки ИИ", callback_data="adm_ai"))
     builder.row(InlineKeyboardButton(text="🌐 Прокси", callback_data="adm_proxy"))
-    builder.row(InlineKeyboardButton(text="🏢 Настройки подразделений", callback_data="adm_points"))
-    builder.row(InlineKeyboardButton(text="📥 Массово адреса/часы", callback_data="adm_bulkpoints"))
-    builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
-    builder.row(InlineKeyboardButton(text="🔍 Проверка близких точек", callback_data="adm_pointconflicts"))
+    builder.row(InlineKeyboardButton(text="🏢 Точки", callback_data="adm_pointsmenu"))
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
@@ -183,10 +179,25 @@ def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="👥 Все пользователи", callback_data="adm_users"))
     builder.row(InlineKeyboardButton(text="📋 Заявки на вступление", callback_data="adm_requests"))
-    builder.row(InlineKeyboardButton(text="🔓 Разблокировать по ID", callback_data="adm_unblockbyid"))
-    builder.row(InlineKeyboardButton(text="🗑 Удалить аккаунт по ID", callback_data="adm_deleteaccount"))
+    builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
+    return builder.as_markup()
+
+
+def admin_points_menu_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🏢 Настройки подразделений", callback_data="adm_points"))
+    builder.row(InlineKeyboardButton(text="📥 Массово адреса/часы", callback_data="adm_bulkpoints"))
+    builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
+    builder.row(InlineKeyboardButton(text="🔍 Проверка близких точек", callback_data="adm_pointconflicts"))
+    return builder.as_markup()
+
+
+def admin_account_menu_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔓 Разблокировать по ID", callback_data="adm_unblockbyid"))
+    builder.row(InlineKeyboardButton(text="🗑 Удалить аккаунт по ID", callback_data="adm_deleteaccount"))
     return builder.as_markup()
 
 
@@ -240,6 +251,10 @@ def point_multiselect_kb(points: list[Point], selected: set[int], mode: str, key
                 text=f"{mark}{point.name}",
                 callback_data=f"{constants.PREFIX_POINT}_{mode}:{key}:{point.id}",
             )
+        )
+    if mode == "mysub":
+        builder.row(
+            InlineKeyboardButton(text="☑️ Подписаться на все", callback_data=f"{constants.PREFIX_POINT}_mysuball:{key}")
         )
     if mode in ("sub", "mysub"):
         builder.row(

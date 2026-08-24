@@ -352,15 +352,22 @@ async def cb_my_point_toggle(callback: CallbackQuery) -> None:
         await callback.message.answer("Готово.")
         return
 
-    point_id = int(parts[2])
-    current = {p.id for p in await database.get_user_points(user_id)}
-    if point_id in current:
-        await database.unsubscribe_user_from_point(user_id, point_id)
-        current.discard(point_id)
-    else:
-        await database.subscribe_user_to_point(user_id, point_id)
-        current.add(point_id)
     all_points = await database.list_points()
+
+    if mode == "mysuball":
+        for point in all_points:
+            await database.subscribe_user_to_point(user_id, point.id)
+        current = {p.id for p in all_points}
+    else:
+        point_id = int(parts[2])
+        current = {p.id for p in await database.get_user_points(user_id)}
+        if point_id in current:
+            await database.unsubscribe_user_from_point(user_id, point_id)
+            current.discard(point_id)
+        else:
+            await database.subscribe_user_to_point(user_id, point_id)
+            current.add(point_id)
+
     await callback.message.edit_reply_markup(
         reply_markup=keyboards.point_multiselect_kb(all_points, current, "mysub", key=str(user_id))
     )
@@ -1178,6 +1185,18 @@ async def cb_admin_broadcast_send(callback: CallbackQuery, state: FSMContext) ->
 
 
 # --- admin: points -------------------------------------------------------
+
+
+@admin_router.callback_query(F.data == "adm_pointsmenu")
+async def cb_admin_points_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.answer("🏢 Точки:", reply_markup=keyboards.admin_points_menu_kb())
+
+
+@admin_router.callback_query(F.data == "adm_accountmenu")
+async def cb_admin_account_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.answer("👤 Управление аккаунтом по ID:", reply_markup=keyboards.admin_account_menu_kb())
 
 
 @admin_router.callback_query(F.data == "adm_points")
