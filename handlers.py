@@ -530,6 +530,7 @@ async def receive_reply_text(message: Message, state: FSMContext) -> None:
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, sent.message_id or "")
     await state.clear()
     await message.answer("✅ Отправлено", reply_markup=keyboards.sent_message_kb(msg_ref))
+    await _show_main_menu(message)
 
 
 _media_group_buffer: dict[str, list[Message]] = {}
@@ -608,6 +609,7 @@ async def _send_photos(anchor: Message, state: FSMContext, messages: list[Messag
 
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, last_avito_message_id)
     await anchor.answer(f"✅ Отправлено {sent_count} фото", reply_markup=keyboards.sent_message_kb(msg_ref))
+    await _show_main_menu(anchor)
 
 
 # --- templates ---------------------------------------------------------------

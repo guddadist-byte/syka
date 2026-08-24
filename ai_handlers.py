@@ -101,6 +101,15 @@ async def send_ai_draft(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(f"✅ Отправлено:\n\n{draft}")
     await callback.message.answer("Готово.", reply_markup=keyboards.sent_message_kb(msg_ref))
 
+    # callback.message is the bot's own message, not the actor's — resolve
+    # the main menu keyboard from callback.from_user.id instead of reusing
+    # handlers._show_main_menu (which would look up the wrong user).
+    user = await database.get_user(callback.from_user.id)
+    if user is not None:
+        await callback.message.answer(
+            "🏠 Главное меню", reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role)
+        )
+
 
 @ai_router.callback_query(F.data.startswith(f"{constants.PREFIX_AIEDIT}_"))
 async def edit_ai_draft(callback: CallbackQuery, state: FSMContext) -> None:

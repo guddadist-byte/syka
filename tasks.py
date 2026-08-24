@@ -169,22 +169,15 @@ async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: b
         item_line = "📦 Сообщение в профиль (без объявления)"
     text = f"📩 Новое сообщение от {client_name}\n{item_line}\n\n{preview}"
 
-    recipients: dict[int, models.User] = {}
     if point_id is None:
         # Fully unresolved chat (coords present but no matching point) —
-        # nobody could have subscribed to a point that doesn't exist yet,
-        # so this still falls back to on-shift admins/directors so someone
-        # sees it and can resolve it manually via "📭 Чаты без точки".
-        for user in await database.list_admins_and_directors():
-            if user.on_shift and not user.blocked_bot:
-                recipients[user.telegram_id] = user
-    else:
-        # Strictly by subscription — no unconditional director exception,
-        # per explicit user request: no subscription to the point means
-        # nothing arrives, including for admins/directors.
-        for user in await database.list_point_subscribers(point_id, on_shift_only=True):
-            recipients[user.telegram_id] = user
+        # per explicit request, notifications are strictly opt-in via
+        # "📍 Мои точки" with no exceptions, and nobody can be subscribed
+        # to a point that doesn't exist yet, so this stays silent. It's
+        # still visible for review in "📭 Чаты без точки".
+        return
 
+    recipients = {u.telegram_id: u for u in await database.list_point_subscribers(point_id, on_shift_only=True)}
     for user_id in recipients:
         await _send_notification(bot, user_id, text, short_id)
 
