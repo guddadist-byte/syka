@@ -818,6 +818,42 @@ async def admin_user_trade_finish(message: Message, state: FSMContext) -> None:
     await message.answer("✅ Торговая точка обновлена.")
 
 
+@admin_router.callback_query(F.data == "adm_unblockbyid")
+async def cb_admin_unblock_by_id_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_unblock_telegram_id)
+    await callback.message.answer("Введите Telegram ID пользователя для разблокировки:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_unblock_telegram_id, SafeFreeText())
+async def admin_unblock_by_id_finish(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    raw = message.text.strip()
+    if not raw.isdigit():
+        await message.answer("⚠️ Введите числовой Telegram ID.")
+        return
+    target_id = int(raw)
+
+    target = await database.get_user(target_id)
+    if target is None:
+        await message.answer("⚠️ Пользователь с таким Telegram ID не найден.")
+        return
+    if target.status != constants.STATUS_BLOCKED:
+        label = target.full_name or target.username or str(target.telegram_id)
+        await message.answer(f"Пользователь {label} не заблокирован (статус: {target.status}).")
+        return
+
+    await database.set_user_status(target_id, constants.STATUS_APPROVED, message.from_user.id)
+    try:
+        await message.bot.send_message(target_id, "✅ Ваш доступ восстановлен.")
+        await database.mark_user_reachable(target_id)
+    except TelegramForbiddenError:
+        await database.mark_user_unreachable(target_id)
+
+    label = target.full_name or target.username or str(target.telegram_id)
+    await message.answer(f"🔓 Пользователь {label} разблокирован.")
+
+
 @admin_router.callback_query(F.data.startswith("adm_setrole_"))
 async def cb_admin_set_role(callback: CallbackQuery) -> None:
     await callback.answer()

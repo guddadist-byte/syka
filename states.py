@@ -67,3 +67,4 @@ class AdminStates(StatesGroup):
     # User editing (Все пользователи)
     waiting_for_user_fullname = State()
     waiting_for_user_trade_point = State()
+    waiting_for_unblock_telegram_id = State()
