@@ -196,17 +196,29 @@ class AvitoClient:
         data = await self._request("GET", f"/messenger/v2/accounts/{self.avito_user_id}/chats", params=params)
         chats = []
         for raw in data.get("chats", []):
+            item = ((raw.get("context") or {}).get("value")) or {}
+            location = item.get("location") or {}
             last_message = raw.get("last_message") or {}
+            # "users" lists both parties; pick whichever isn't us (confirmed via
+            # a live account: our own avito_user_id shows up in that list too,
+            # relying on positional order alone isn't safe).
+            other_users = [u for u in (raw.get("users") or []) if u.get("id") != self.avito_user_id]
+            client_name = (other_users or raw.get("users") or [{}])[0].get("name", "")
+            updated_ts = raw.get("updated") or last_message.get("created")
             chats.append(
                 models.AvitoChat(
                     chat_id=raw["id"],
-                    item_id=str(raw.get("context", {}).get("value", {}).get("id") or ""),
-                    client_name=(raw.get("users") or [{}])[0].get("name", ""),
+                    item_id=str(item.get("id") or ""),
+                    client_name=client_name,
                     last_message_id=last_message.get("id"),
                     last_message_text=(last_message.get("content") or {}).get("text", ""),
                     last_message_direction="in" if last_message.get("direction") == "in" else "out",
-                    last_message_at=str(last_message.get("created")),
+                    last_message_at=utils.utcnow_str() if updated_ts is None else utils.from_unix(updated_ts).strftime("%Y-%m-%d %H:%M:%S"),
                     unread_count=int(raw.get("unread") or 0),
+                    item_lat=location.get("lat"),
+                    item_lon=location.get("lon"),
+                    location_title=location.get("title"),
+                    item_title=item.get("title"),
                 )
             )
         return chats
@@ -220,13 +232,15 @@ class AvitoClient:
         messages = []
         for raw in data.get("messages", []):
             content = raw.get("content") or {}
+            created = raw.get("created")
             messages.append(
                 models.AvitoMessage(
                     message_id=raw["id"],
                     direction="in" if raw.get("direction") == "in" else "out",
                     text=content.get("text", ""),
                     has_image="image" in content,
-                    created_at=str(raw.get("created")),
+                    created_at=(utils.utcnow_str() if created is None
+                                else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),
                 )
             )
         return messages
@@ -240,12 +254,13 @@ class AvitoClient:
                 headers={"X-Idempotency-Key": message_uuid},
                 json={"message": {"text": text}, "type": "text"},
             )
+        created = data.get("created")
         return models.AvitoMessage(
             message_id=data.get("id", ""),
             direction="out",
             text=text,
             has_image=False,
-            created_at=str(data.get("created", datetime.utcnow())),
+            created_at=utils.utcnow_str() if created is None else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def upload_image(self, image_bytes: bytes, filename: str) -> str:
@@ -268,27 +283,17 @@ class AvitoClient:
                 headers={"X-Idempotency-Key": message_uuid},
                 json={"image_id": image_id},
             )
+        created = data.get("created")
         return models.AvitoMessage(
             message_id=data.get("id", ""),
             direction="out",
             text="",
             has_image=True,
-            created_at=str(data.get("created", datetime.utcnow())),
+            created_at=utils.utcnow_str() if created is None else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S"),
         )
 
     async def mark_chat_read(self, chat_id: str) -> None:
         await self._request("POST", f"/messenger/v1/accounts/{self.avito_user_id}/chats/{chat_id}/read")
-
-    async def get_item_info(self, item_id: str) -> models.AvitoItem:
-        data = await self._request("GET", f"/core/v1/items/{item_id}")
-        coords = data.get("coordinates") or {}
-        return models.AvitoItem(
-            item_id=item_id,
-            lat=coords.get("lat"),
-            lon=coords.get("lng") or coords.get("lon"),
-            address_text=data.get("address"),
-            title=data.get("title"),
-        )
 
     async def delete_message(self, chat_id: str, message_id: str) -> None:
         await self._request(

@@ -241,6 +241,10 @@ class AvitoChat:
     last_message_direction: str
     last_message_at: str
     unread_count: int
+    item_lat: float | None = None
+    item_lon: float | None = None
+    location_title: str | None = None
+    item_title: str | None = None
 
 
 @dataclass
@@ -251,11 +255,3 @@ class AvitoMessage:
     has_image: bool
     created_at: str
 
-
-@dataclass
-class AvitoItem:
-    item_id: str
-    lat: float | None
-    lon: float | None
-    address_text: str | None
-    title: str | None

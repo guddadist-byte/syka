@@ -948,10 +948,35 @@ async def admin_point_rename_finish(message: Message, state: FSMContext) -> None
 
 @admin_router.callback_query(F.data == "adm_syncpoints")
 async def cb_admin_sync_points(callback: CallbackQuery) -> None:
-    await callback.answer(
-        "Синк адресов зависит от неподтверждённого эндпоинта объявлений Avito — "
-        "заглушка до проверки на реальном аккаунте (см. план, «Известные ограничения»).",
-        show_alert=True,
+    await callback.answer("Синк запущен…")
+    accounts = await database.list_avito_accounts(active_only=True)
+    seen_coords = 0
+    for account in accounts:
+        client = avito_client.get_pool().get(account.id)
+        if client is None:
+            continue
+        offset = 0
+        while True:
+            try:
+                chats = await client.get_chats(limit=100, offset=offset)
+            except avito_client.AvitoAPIError:
+                break
+            if not chats:
+                break
+            for chat in chats:
+                if chat.item_lat is None or chat.item_lon is None:
+                    continue
+                seen_coords += 1
+                name = chat.location_title or chat.item_title or f"Точка {chat.item_lat:.4f},{chat.item_lon:.4f}"
+                await database.upsert_point_from_avito(name=name, address=None, lat=chat.item_lat, lon=chat.item_lon)
+            if len(chats) < 100:
+                break
+            offset += 100
+    points = await database.list_points()
+    await callback.message.answer(
+        f"🗺 Синк завершён: обработано координат из чатов — {seen_coords}, точек в базе сейчас — {len(points)}.\n"
+        f"Проверьте список в «🏢 Настройки подразделений» — названия можно переименовать, "
+        f"это уже не перезапишется следующим синком."
     )
 
 

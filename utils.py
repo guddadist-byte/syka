@@ -41,6 +41,11 @@ def utcnow_str() -> str:
     return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def from_unix(ts: int | float | str) -> datetime:
+    """Avito's chat/message timestamps are unix seconds, not ISO strings."""
+    return datetime.utcfromtimestamp(float(ts))
+
+
 def next_msk_morning(now_utc: datetime, hour: int = 9) -> datetime:
     """Next occurrence of `hour`:00 Moscow time, returned as a UTC datetime."""
     now_msk = now_utc + timedelta(hours=MSK_OFFSET_HOURS)

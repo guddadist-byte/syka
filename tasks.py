@@ -57,13 +57,10 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
                          client: "avito_client.AvitoClient") -> None:
     point_id: int | None = None
     if chat.item_id:
-        lat = lon = None
-        try:
-            item_info = await client.get_item_info(chat.item_id)
-            lat, lon = item_info.lat, item_info.lon
-        except avito_client.AvitoAPIError:
-            pass
-        point = await database.resolve_point_for_item(chat.item_id, lat, lon)
+        # Confirmed against a live account: the chat-list response already
+        # embeds the ad's coordinates (context.value.location), no separate
+        # item lookup needed.
+        point = await database.resolve_point_for_item(chat.item_id, chat.item_lat, chat.item_lon)
         point_id = point.id if point else None
 
     cached = await bot_cache.upsert_chat(
