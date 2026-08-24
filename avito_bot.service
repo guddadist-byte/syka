@@ -1,0 +1,24 @@
+[Unit]
+Description=Avito CRM Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=avitobot
+Group=avitobot
+WorkingDirectory=/opt/avito_bot
+EnvironmentFile=/opt/avito_bot/.env
+ExecStart=/opt/avito_bot/venv/bin/python /opt/avito_bot/main.py
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+StandardOutput=append:/var/log/avito_bot/bot.log
+StandardError=append:/var/log/avito_bot/bot.err.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/avito_bot /var/log/avito_bot
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
