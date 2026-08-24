@@ -1019,20 +1019,8 @@ async def cb_admin_avito_add_start(callback: CallbackQuery, state: FSMContext) -
 @admin_router.message(AdminStates.waiting_for_avito_name, SafeFreeText())
 async def admin_avito_name(message: Message, state: FSMContext) -> None:
     await state.update_data(avito_name=message.text.strip())
-    await state.set_state(AdminStates.waiting_for_avito_user_id)
-    await message.answer("Введите числовой avito_user_id аккаунта:")
-
-
-@admin_router.message(AdminStates.waiting_for_avito_user_id, SafeFreeText())
-async def admin_avito_user_id(message: Message, state: FSMContext) -> None:
-    try:
-        avito_user_id = int(message.text.strip())
-    except ValueError:
-        await message.answer("Нужно число.")
-        return
-    await state.update_data(avito_user_id=avito_user_id)
     await state.set_state(AdminStates.waiting_for_avito_client_id)
-    await message.answer("Введите client_id:")
+    await message.answer("Введите client_id (из кабинета Avito, раздел «Интеграции и API»):")
 
 
 @admin_router.message(AdminStates.waiting_for_avito_client_id, SafeFreeText())
@@ -1045,9 +1033,23 @@ async def admin_avito_client_id(message: Message, state: FSMContext) -> None:
 @admin_router.message(AdminStates.waiting_for_avito_client_secret, SafeFreeText())
 async def admin_avito_client_secret(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
+    client_id = data["avito_client_id"]
+    client_secret = message.text.strip()
+
+    await message.answer("Проверяю учётные данные в Avito…")
+    try:
+        info = await avito_client.fetch_account_info(client_id, client_secret, avito_client.get_session())
+    except avito_client.AvitoAPIError as exc:
+        await message.answer(f"⚠️ Avito отклонил client_id/client_secret: {exc}\nПопробуйте ещё раз или /cancel.")
+        return
+
+    avito_user_id = info.get("id")
+    if not avito_user_id:
+        await message.answer("⚠️ Avito не вернул id аккаунта (ответ без поля «id»). Проверьте данные и попробуйте снова.")
+        return
+
     account = await database.create_avito_account(
-        name=data["avito_name"], avito_user_id=data["avito_user_id"],
-        client_id=data["avito_client_id"], client_secret=message.text.strip(),
+        name=data["avito_name"], avito_user_id=avito_user_id, client_id=client_id, client_secret=client_secret,
     )
     await avito_client.reload_accounts()
     await state.clear()
@@ -1055,7 +1057,7 @@ async def admin_avito_client_secret(message: Message, state: FSMContext) -> None
         await message.delete()
     except Exception:
         pass
-    await message.answer(f"✅ Аккаунт «{account.name}» добавлен.")
+    await message.answer(f"✅ Аккаунт «{account.name}» добавлен, avito_user_id={avito_user_id} (получен автоматически).")
 
 
 # --- admin: AI settings ----------------------------------------------------

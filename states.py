@@ -29,7 +29,6 @@ class AdminStates(StatesGroup):
 
     # Avito accounts
     waiting_for_avito_name = State()
-    waiting_for_avito_user_id = State()
     waiting_for_avito_client_id = State()
     waiting_for_avito_client_secret = State()
     waiting_for_avito_point = State()

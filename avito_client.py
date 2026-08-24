@@ -34,7 +34,7 @@ from constants import AVITO_MAX_RETRIES, AVITO_MIN_REQUEST_INTERVAL_SECONDS, INF
 logger = logging.getLogger(__name__)
 
 AVITO_BASE_URL = "https://api.avito.ru"
-TOKEN_URL = f"{AVITO_BASE_URL}/token"
+TOKEN_URL = f"{AVITO_BASE_URL}/token/"
 
 
 class AvitoAPIError(Exception):
@@ -75,6 +75,36 @@ async def wait_for_inflight_sends(timeout: float = INFLIGHT_SHUTDOWN_TIMEOUT_SEC
         await asyncio.wait_for(_inflight_zero_event.wait(), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("wait_for_inflight_sends: timed out with %d send(s) still in flight", _inflight_sends)
+
+
+async def fetch_account_info(client_id: str, client_secret: str, session: aiohttp.ClientSession) -> dict:
+    """One-off client_credentials + accounts/self probe.
+
+    Used when onboarding a new Avito account (admin "🔑 Avito API" flow)
+    before any avito_accounts DB row exists yet — Avito's seller cabinet
+    only shows client_id/client_secret, never the numeric avito_user_id
+    needed for every other endpoint; it has to be looked up this way.
+    Confirmed working against a real account: POST /token/ (trailing slash
+    required) then GET /core/v1/accounts/self, whose "id" field is the
+    avito_user_id.
+    """
+    async with session.post(
+        TOKEN_URL,
+        data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret},
+    ) as resp:
+        if resp.status != 200:
+            text = await resp.text()
+            raise AvitoAuthError(f"token request failed: {resp.status}: {text}")
+        token_data = await resp.json()
+
+    token = token_data["access_token"]
+    async with session.get(
+        f"{AVITO_BASE_URL}/core/v1/accounts/self", headers={"Authorization": f"Bearer {token}"}
+    ) as resp:
+        if resp.status != 200:
+            text = await resp.text()
+            raise AvitoAPIError(f"accounts/self failed: {resp.status}: {text}")
+        return await resp.json()
 
 
 class AvitoClient:
@@ -294,10 +324,12 @@ class AvitoClientPool:
 
 
 _pool: AvitoClientPool | None = None
+_session: aiohttp.ClientSession | None = None
 
 
 async def init_pool(session: aiohttp.ClientSession) -> None:
-    global _pool
+    global _pool, _session
+    _session = session
     _pool = AvitoClientPool(session)
     await _pool.refresh_from_db()
 
@@ -306,6 +338,12 @@ def get_pool() -> AvitoClientPool:
     if _pool is None:
         raise RuntimeError("avito_client.init_pool() has not been called yet")
     return _pool
+
+
+def get_session() -> aiohttp.ClientSession:
+    if _session is None:
+        raise RuntimeError("avito_client.init_pool() has not been called yet")
+    return _session
 
 
 async def reload_accounts() -> None:
