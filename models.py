@@ -178,20 +178,6 @@ class BackupConfig:
 
 
 @dataclass
-class Snooze:
-    id: int
-    chat_id: str
-    user_id: int
-    remind_at: str
-    created_at: str
-    fired: int
-
-    @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "Snooze":
-        return _row(cls, row)
-
-
-@dataclass
 class ChatSummary:
     chat_id: str
     avito_account_id: int

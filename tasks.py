@@ -1,4 +1,4 @@
-"""Background polling: Avito message ingestion, snooze reminders, backups.
+"""Background polling: Avito message ingestion, backups.
 
 Imports bot_cache and avito_client directly (both are self-contained
 module singletons) rather than through handlers.py — that's the mechanism
@@ -183,21 +183,6 @@ async def _prune_messages_loop() -> None:
             logger.exception("_prune_messages_loop: failed")
 
 
-async def _snooze_loop(bot: Bot) -> None:
-    while True:
-        await asyncio.sleep(constants.SNOOZE_LOOP_INTERVAL_SECONDS)
-        try:
-            for snooze in await database.list_due_snoozes(datetime.utcnow()):
-                chat = await bot_cache.get_chat(snooze.chat_id)
-                short_id = await bot_cache.get_short_id(snooze.chat_id)
-                client_name = chat.client_name if chat else "клиент"
-                text = f"⏰ Напоминание: чат с {client_name} всё ещё не закрыт"
-                await _send_notification(bot, snooze.user_id, text, short_id)
-                await database.mark_snooze_fired(snooze.id)
-        except Exception:
-            logger.exception("_snooze_loop: failed")
-
-
 async def run_backup_now(bot: Bot, db_path: str) -> None:
     tmp_path = f"{db_path}.backup-{int(datetime.utcnow().timestamp())}.db"
     await database.vacuum_into(tmp_path)
@@ -244,7 +229,6 @@ async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
     tasks.append(asyncio.create_task(_reload_accounts_loop()))
     tasks.append(asyncio.create_task(_prune_messages_loop()))
-    tasks.append(asyncio.create_task(_snooze_loop(bot)))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
     return tasks
 

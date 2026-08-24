@@ -10,6 +10,7 @@ intercepted before it can be mistaken for a reply to an Avito client.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import datetime, timedelta
@@ -79,11 +80,18 @@ async def _point_ids_for_user(user) -> set[int] | None:
 
 
 async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state: FSMContext, actor_id: int) -> None:
-    lines = [f"💬 Диалог с {chat.client_name or 'клиентом'}", ""]
+    client_name = html.escape(chat.client_name or "клиентом")
+    lines = [f"💬 Диалог с {client_name}"]
+    if chat.item_title and chat.item_url:
+        lines.append(f'📦 <a href="{html.escape(chat.item_url)}">{html.escape(chat.item_title)}</a>')
+    elif chat.item_title:
+        lines.append(f"📦 {html.escape(chat.item_title)}")
+    lines.append("")
     for m in list(chat.messages)[-10:]:
         prefix = "👤" if m.direction == "in" else "🧑‍💼"
-        lines.append(f"{prefix} {m.text or '(фото)'}")
-    if len(lines) == 2:
+        text = html.escape(m.text) if m.text else "(фото)"
+        lines.append(f"{prefix} {text}")
+    if not chat.messages:
         lines.append("(сообщений пока нет)")
 
     actor = await database.get_user(actor_id)
@@ -91,7 +99,7 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
 
     await target.answer("\n".join(lines), reply_markup=keyboards.chat_detail_kb(chat.short_id, can_reassign))
     prompt = await target.answer(
-        f"✍️ Печатаете ответ клиенту «{chat.client_name or 'клиент'}»",
+        f"✍️ Печатаете ответ клиенту «{client_name}»",
         reply_markup=ForceReply(input_field_placeholder=f"Ответ: {(chat.client_name or '')[:40]}"),
     )
     await state.set_state(ReplyStates.waiting_for_text)
@@ -346,7 +354,7 @@ async def show_admin_panel(message: Message) -> None:
     await message.answer("⚙️ Настройки", reply_markup=keyboards.admin_panel_kb())
 
 
-# --- CRM: chat detail, reply, snooze, delete, reassign, profile rating -----
+# --- CRM: chat detail, reply, delete, reassign, profile rating -------------
 
 
 @crm_router.callback_query(F.data.startswith((f"{constants.PREFIX_CHAT}_", f"{constants.PREFIX_REPLY}_")))
@@ -395,26 +403,16 @@ async def cb_refresh(callback: CallbackQuery, state: FSMContext) -> None:
     await _render_chat_detail(callback.message, chat, state, callback.from_user.id)
 
 
-async def _snooze(callback: CallbackQuery, remind_at: datetime) -> None:
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_BACKMENU}_"))
+async def cb_back_to_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
-    _, short_id = callback.data.split("_", 1)
-    chat = await bot_cache.resolve_chat(short_id)
-    if chat is None:
+    await state.clear()
+    user = await database.get_user(callback.from_user.id)
+    if user is None:
         return
-    await bot_cache.mark_read(chat.chat_id)
-    await database.set_chat_unread_count(chat.chat_id, 0)
-    await database.create_snooze(chat.chat_id, callback.from_user.id, remind_at)
-    await callback.message.answer("⏰ Отложено, напомню позже.")
-
-
-@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_SNZ2H}_"))
-async def cb_snooze_2h(callback: CallbackQuery) -> None:
-    await _snooze(callback, datetime.utcnow() + timedelta(hours=2))
-
-
-@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_SNZAM}_"))
-async def cb_snooze_morning(callback: CallbackQuery) -> None:
-    await _snooze(callback, utils.next_msk_morning(datetime.utcnow()))
+    await callback.message.answer(
+        "🏠 Главное меню", reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role)
+    )
 
 
 @crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_DELMSG}_"))

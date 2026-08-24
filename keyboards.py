@@ -76,10 +76,6 @@ def chat_detail_kb(short_id: str, can_reassign: bool = False) -> InlineKeyboardM
         InlineKeyboardButton(text="🔄 Обновить", callback_data=f"{constants.PREFIX_REFRESH}_{short_id}"),
     )
     builder.row(
-        InlineKeyboardButton(text="⏰ Через 2 часа", callback_data=f"{constants.PREFIX_SNZ2H}_{short_id}"),
-        InlineKeyboardButton(text="🌅 Завтра утром", callback_data=f"{constants.PREFIX_SNZAM}_{short_id}"),
-    )
-    builder.row(
         InlineKeyboardButton(text="🧠 ИИ-ответ", callback_data=f"{constants.PREFIX_AIDRAFT}_{short_id}"),
         InlineKeyboardButton(text="📋 Шаблоны", callback_data=f"{constants.PREFIX_TPL}_{short_id}"),
     )
@@ -89,6 +85,9 @@ def chat_detail_kb(short_id: str, can_reassign: bool = False) -> InlineKeyboardM
                 text="🔀 Переназначить точку", callback_data=f"{constants.PREFIX_REASSIGN}_{short_id}"
             )
         )
+    builder.row(
+        InlineKeyboardButton(text=constants.BTN_BACK, callback_data=f"{constants.PREFIX_BACKMENU}_{short_id}")
+    )
     return builder.as_markup()
 
 

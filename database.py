@@ -718,29 +718,6 @@ async def mark_backup_done(at: datetime) -> None:
     )
 
 
-# --- snoozes -------------------------------------------------------------
-
-
-async def create_snooze(chat_id: str, user_id: int, remind_at: datetime) -> int:
-    cur = await _execute(
-        "INSERT INTO snoozes (chat_id, user_id, remind_at) VALUES (?, ?, ?)",
-        (chat_id, user_id, remind_at.strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    return cur.lastrowid
-
-
-async def list_due_snoozes(now_utc: datetime) -> list[models.Snooze]:
-    rows = await _fetchall(
-        "SELECT * FROM snoozes WHERE fired = 0 AND remind_at <= ?",
-        (now_utc.strftime("%Y-%m-%d %H:%M:%S"),),
-    )
-    return [models.Snooze.from_row(r) for r in rows]
-
-
-async def mark_snooze_fired(snooze_id: int) -> None:
-    await _execute("UPDATE snoozes SET fired = 1 WHERE id = ?", (snooze_id,))
-
-
 # --- chats / messages ------------------------------------------------------
 
 
