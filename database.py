@@ -353,14 +353,56 @@ async def upsert_point_from_avito(name: str, address: str | None, lat: float, lo
 # --- item -> point routing (sticky, item_id is the primary routing key) ------
 
 
-async def resolve_point_for_item(item_id: str, lat: float | None, lon: float | None) -> models.Point | None:
+_FALLBACK_POINT_NAME = "📭 Без геоданных (профиль)"
+
+
+async def get_or_create_fallback_point() -> models.Point:
+    """Sticky synthetic point for chats with no ad-level geo data at all.
+
+    name_is_custom=1 from creation so a later admin rename never gets
+    reverted — the fallback point never receives coordinates, so the
+    Avito-sync clustering path (`upsert_point_from_avito`) would never
+    touch it anyway, but this keeps the invariant explicit.
+    """
+    row = await _fetchone("SELECT * FROM points WHERE is_fallback = 1 LIMIT 1")
+    if row is not None:
+        return models.Point.from_row(row)
+    cur = await _execute(
+        "INSERT INTO points (name, is_fallback, name_is_custom) VALUES (?, 1, 1)",
+        (_FALLBACK_POINT_NAME,),
+    )
+    point = await get_point(cur.lastrowid)
+    assert point is not None
+    return point
+
+
+async def resolve_point_for_item(item_id: str | None, lat: float | None, lon: float | None) -> models.Point | None:
+    if not item_id:
+        # Direct-to-profile message, not tied to any ad — no item_id to key
+        # a sticky avito_items row on, always route to the fallback point.
+        return await get_or_create_fallback_point()
+
     row = await _fetchone("SELECT * FROM avito_items WHERE item_id = ?", (item_id,))
     if row is not None:
         if row["point_id"] is None:
             return None
         return await get_point(row["point_id"])
 
-    point = await resolve_point_by_coords(lat, lon) if lat is not None and lon is not None else None
+    if lat is None or lon is None:
+        # Ad exists but Avito gave us no coordinates for it — geo-less, not
+        # an ambiguous coordinate mismatch, so it goes straight to the
+        # fallback point rather than the manual "unassigned chats" queue.
+        fallback = await get_or_create_fallback_point()
+        await _execute(
+            """
+            INSERT INTO avito_items (item_id, point_id, lat, lon, resolved_by, resolved_at)
+            VALUES (?, ?, ?, ?, 'fallback', datetime('now'))
+            """,
+            (item_id, fallback.id, lat, lon),
+        )
+        return fallback
+
+    point = await resolve_point_by_coords(lat, lon)
     await _execute(
         """
         INSERT INTO avito_items (item_id, point_id, lat, lon, resolved_by, resolved_at)
@@ -369,6 +411,24 @@ async def resolve_point_for_item(item_id: str, lat: float | None, lon: float | N
         (item_id, point.id if point else None, lat, lon, "coords" if point else None),
     )
     return point
+
+
+async def backfill_fallback_items() -> None:
+    """One-time (idempotent) fixup for avito_items rows stuck unresolved
+
+    before the fallback point existed (item had no lat/lon and no manual
+    reassignment). Safe to call on every startup — only touches rows still
+    NULL. chats.point_id for these self-heals on the next poll cycle via
+    the normal upsert_chat_summary() call, no need to touch it here.
+    """
+    fallback = await get_or_create_fallback_point()
+    await _execute(
+        """
+        UPDATE avito_items SET point_id = ?, resolved_by = 'fallback'
+        WHERE point_id IS NULL AND lat IS NULL AND lon IS NULL
+        """,
+        (fallback.id,),
+    )
 
 
 async def reassign_item_point(item_id: str, point_id: int, actor_id: int) -> None:
@@ -761,6 +821,15 @@ async def append_message(chat_id: str, direction: str, text: str | None, has_ima
         """,
         (chat_id, avito_message_id, message_uuid, direction, text, 1 if has_image else 0, sent_at),
     )
+
+
+async def get_known_message_ids(chat_id: str) -> set[str]:
+    """Durable dedup set — survives process restarts, unlike bot_cache."""
+    rows = await _fetchall(
+        "SELECT avito_message_id FROM messages WHERE chat_id = ? AND avito_message_id IS NOT NULL",
+        (chat_id,),
+    )
+    return {r["avito_message_id"] for r in rows}
 
 
 async def get_recent_messages(chat_id: str, limit: int = 20) -> list[models.Message]:

@@ -8,6 +8,7 @@ that avoids a circular import between the poller and the button handlers.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 import os
 from datetime import datetime, timedelta
@@ -55,17 +56,18 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
 
 async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bot: Bot,
                          client: "avito_client.AvitoClient") -> None:
-    point_id: int | None = None
-    if chat.item_id:
-        # Confirmed against a live account: the chat-list response already
-        # embeds the ad's coordinates (context.value.location), no separate
-        # item lookup needed.
-        point = await database.resolve_point_for_item(chat.item_id, chat.item_lat, chat.item_lon)
-        point_id = point.id if point else None
+    # Confirmed against a live account: the chat-list response already
+    # embeds the ad's coordinates (context.value.location), no separate
+    # item lookup needed. resolve_point_for_item handles both a missing
+    # item_id (direct-to-profile message) and an item with no coordinates
+    # by routing to the fallback point itself.
+    point = await database.resolve_point_for_item(chat.item_id, chat.item_lat, chat.item_lon)
+    point_id = point.id if point else None
 
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
+        item_title=chat.item_title, item_url=chat.item_url,
     )
     await database.upsert_chat_summary(
         chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
@@ -81,7 +83,16 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     except avito_client.AvitoAPIError:
         return
 
+    known_ids = await database.get_known_message_ids(chat.chat_id)
+
     for message in messages:
+        if message.message_id is not None and message.message_id in known_ids:
+            # Already persisted before a restart — bot_cache is in-memory
+            # and resets on every restart, so without this DB-backed check
+            # every message in Avito's recent history would look "new"
+            # again on the first poll after a restart and re-notify.
+            continue
+
         created_at = utils.parse_utc(message.created_at) if message.created_at else datetime.utcnow()
         cached_message = bot_cache.CachedMessage(
             avito_message_id=message.message_id,
@@ -109,7 +120,7 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             chat.chat_id, avito_account_id=account.id, point_id=point_id,
             last_message_at=sent_at_str, last_message_text=message.text, last_message_dir="in",
         )
-        await _notify_subscribers(chat.chat_id, point_id, cached_message, bot)
+        await _notify_subscribers(chat.chat_id, point_id, cached, cached_message, bot)
 
 
 async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: str) -> None:
@@ -121,22 +132,34 @@ async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: st
         logger.exception("_send_notification: failed to notify %s", telegram_id)
 
 
-async def _notify_subscribers(chat_id: str, point_id: int | None, message: bot_cache.CachedMessage, bot: Bot) -> None:
+async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: bot_cache.CachedChat,
+                               message: bot_cache.CachedMessage, bot: Bot) -> None:
     short_id = await bot_cache.get_short_id(chat_id)
-    preview = message.text[:200] if message.text else "(фото)"
-    text = f"📩 Новое сообщение\n\n{preview}"
+    client_name = html.escape(cached_chat.client_name or "клиент")
+    preview = html.escape(message.text[:200]) if message.text else "(фото)"
+    if cached_chat.item_title and cached_chat.item_url:
+        item_line = f'📦 <a href="{html.escape(cached_chat.item_url)}">{html.escape(cached_chat.item_title)}</a>'
+    elif cached_chat.item_title:
+        item_line = f"📦 {html.escape(cached_chat.item_title)}"
+    else:
+        item_line = "📦 Сообщение в профиль (без объявления)"
+    text = f"📩 Новое сообщение от {client_name}\n{item_line}\n\n{preview}"
 
     recipients: dict[int, models.User] = {}
     if point_id is None:
+        # Fully unresolved chat (coords present but no matching point) —
+        # nobody could have subscribed to a point that doesn't exist yet,
+        # so this still falls back to on-shift admins/directors so someone
+        # sees it and can resolve it manually via "📭 Чаты без точки".
         for user in await database.list_admins_and_directors():
             if user.on_shift and not user.blocked_bot:
                 recipients[user.telegram_id] = user
     else:
+        # Strictly by subscription — no unconditional director exception,
+        # per explicit user request: no subscription to the point means
+        # nothing arrives, including for admins/directors.
         for user in await database.list_point_subscribers(point_id, on_shift_only=True):
             recipients[user.telegram_id] = user
-        for user in await database.list_admins_and_directors():
-            if user.role == constants.DIRECTOR and user.on_shift and not user.blocked_bot:
-                recipients[user.telegram_id] = user
 
     for user_id in recipients:
         await _send_notification(bot, user_id, text, short_id)

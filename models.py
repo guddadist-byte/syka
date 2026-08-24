@@ -245,6 +245,7 @@ class AvitoChat:
     item_lon: float | None = None
     location_title: str | None = None
     item_title: str | None = None
+    item_url: str | None = None
 
 
 @dataclass

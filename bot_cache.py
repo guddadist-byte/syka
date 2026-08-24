@@ -42,6 +42,8 @@ class CachedChat:
     point_id: int | None
     client_name: str
     item_id: str | None = None
+    item_title: str | None = None
+    item_url: str | None = None
     messages: deque[CachedMessage] = field(default_factory=lambda: deque(maxlen=50))
     unread_count: int = 0
     last_message_at: datetime | None = None
@@ -85,7 +87,8 @@ async def get_short_id(chat_id: str) -> str:
 
 
 async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: int,
-                       client_name: str, item_id: str | None = None) -> CachedChat:
+                       client_name: str, item_id: str | None = None,
+                       item_title: str | None = None, item_url: str | None = None) -> CachedChat:
     async with _lock:
         chat = _chats.get(chat_id)
         if chat is None:
@@ -97,6 +100,8 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 point_id=point_id,
                 client_name=client_name,
                 item_id=item_id,
+                item_title=item_title,
+                item_url=item_url,
             )
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
@@ -108,6 +113,10 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 chat.client_name = client_name
             if item_id is not None:
                 chat.item_id = item_id
+            if item_title is not None:
+                chat.item_title = item_title
+            if item_url is not None:
+                chat.item_url = item_url
         return chat
 
 

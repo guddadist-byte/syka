@@ -228,6 +228,7 @@ class AvitoClient:
                     item_lon=location.get("lon"),
                     location_title=location.get("title"),
                     item_title=item.get("title"),
+                    item_url=item.get("url"),
                 )
             )
         return chats
