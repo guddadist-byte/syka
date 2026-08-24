@@ -210,6 +210,44 @@ async def update_user_trade_point(telegram_id: int, trade_point_name: str) -> No
     await _execute("UPDATE users SET trade_point_name = ? WHERE telegram_id = ?", (trade_point_name, telegram_id))
 
 
+async def can_delete_user(telegram_id: int) -> str | None:
+    """None if safe to hard-delete, otherwise a human-readable reason not to."""
+    row = await _fetchone("SELECT COUNT(*) AS n FROM payments WHERE user_id = ?", (telegram_id,))
+    if row and row["n"]:
+        return "есть история платежей"
+    row = await _fetchone("SELECT COUNT(*) AS n FROM broadcasts WHERE author_id = ?", (telegram_id,))
+    if row and row["n"]:
+        return "есть отправленные рассылки"
+    return None
+
+
+async def delete_user_account(telegram_id: int) -> None:
+    """Hard-deletes a user so they can go through registration again.
+
+    Caller must have already checked can_delete_user() returns None.
+    Nullable FKs pointing at this user (approver, template author, last
+    replier, someone else's access_requests actor) are cleared without
+    touching the rows themselves; this user's own access_requests (their
+    personal registration trail, NOT NULL FK, no cascade) are deleted
+    outright. subscriptions.user_id is ON DELETE CASCADE and cleans up on
+    its own.
+    """
+    for sql in (
+        "UPDATE users SET approved_by = NULL WHERE approved_by = ?",
+        "UPDATE templates SET created_by = NULL WHERE created_by = ?",
+        "UPDATE ai_config SET updated_by = NULL WHERE updated_by = ?",
+        "UPDATE proxy_config SET updated_by = NULL WHERE updated_by = ?",
+        "UPDATE payment_config SET updated_by = NULL WHERE updated_by = ?",
+        "UPDATE welcome_config SET updated_by = NULL WHERE updated_by = ?",
+        "UPDATE backup_config SET updated_by = NULL WHERE updated_by = ?",
+        "UPDATE access_requests SET actor_id = NULL WHERE actor_id = ?",
+        "UPDATE chats SET last_replied_by = NULL WHERE last_replied_by = ?",
+    ):
+        await _execute(sql, (telegram_id,))
+    await _execute("DELETE FROM access_requests WHERE user_id = ?", (telegram_id,))
+    await _execute("DELETE FROM users WHERE telegram_id = ?", (telegram_id,))
+
+
 async def mark_user_unreachable(telegram_id: int) -> None:
     await _execute("UPDATE users SET blocked_bot = 1 WHERE telegram_id = ?", (telegram_id,))
 

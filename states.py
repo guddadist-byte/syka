@@ -68,3 +68,4 @@ class AdminStates(StatesGroup):
     waiting_for_user_fullname = State()
     waiting_for_user_trade_point = State()
     waiting_for_unblock_telegram_id = State()
+    waiting_for_delete_telegram_id = State()

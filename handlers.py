@@ -854,6 +854,75 @@ async def admin_unblock_by_id_finish(message: Message, state: FSMContext) -> Non
     await message.answer(f"🔓 Пользователь {label} разблокирован.")
 
 
+@admin_router.callback_query(F.data == "adm_deleteaccount")
+async def cb_admin_delete_account_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_delete_telegram_id)
+    await callback.message.answer(
+        "Введите Telegram ID пользователя для удаления аккаунта:", reply_markup=keyboards.cancel_kb()
+    )
+
+
+@admin_router.message(AdminStates.waiting_for_delete_telegram_id, SafeFreeText())
+async def admin_delete_account_confirm(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    raw = message.text.strip()
+    if not raw.isdigit():
+        await message.answer("⚠️ Введите числовой Telegram ID.")
+        return
+    target_id = int(raw)
+
+    target = await database.get_user(target_id)
+    if target is None:
+        await message.answer("⚠️ Пользователь с таким Telegram ID не найден.")
+        return
+
+    label = target.full_name or target.username or str(target.telegram_id)
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"adm_delconfirm_{target_id}"),
+        InlineKeyboardButton(text="❌ Отмена", callback_data="adm_delcancel"),
+    )
+    await message.answer(
+        f"⚠️ Удалить аккаунт «{label}» (id {target_id})?\n"
+        "Он сможет подать новую заявку через /start. Действие необратимо.",
+        reply_markup=builder.as_markup(),
+    )
+
+
+@admin_router.callback_query(F.data == "adm_delcancel")
+async def cb_admin_delete_account_cancel(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.edit_text("Отменено.")
+
+
+@admin_router.callback_query(F.data.startswith("adm_delconfirm_"))
+async def cb_admin_delete_account_confirm(callback: CallbackQuery) -> None:
+    await callback.answer()
+    target_id = int(callback.data.rsplit("_", 1)[1])
+
+    target = await database.get_user(target_id)
+    if target is None:
+        await callback.message.edit_text("⚠️ Пользователь с таким Telegram ID не найден.")
+        return
+
+    reason = await database.can_delete_user(target_id)
+    if reason is not None:
+        await callback.message.edit_text(f"⚠️ Нельзя удалить: {reason}.")
+        return
+
+    label = target.full_name or target.username or str(target.telegram_id)
+    await database.delete_user_account(target_id)
+    try:
+        await callback.bot.send_message(
+            target_id, "Ваша учётная запись сброшена администратором. Отправьте /start, чтобы подать новую заявку."
+        )
+    except TelegramForbiddenError:
+        pass
+
+    await callback.message.edit_text(f"🗑 Аккаунт «{label}» (id {target_id}) удалён.")
+
+
 @admin_router.callback_query(F.data.startswith("adm_setrole_"))
 async def cb_admin_set_role(callback: CallbackQuery) -> None:
     await callback.answer()
