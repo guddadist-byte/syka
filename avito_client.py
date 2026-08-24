@@ -17,6 +17,7 @@ aiogram Bot's session).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -179,9 +180,17 @@ class AvitoClient:
                     if resp.status >= 400:
                         text = await resp.text()
                         raise AvitoAPIError(f"{method} {path} -> {resp.status}: {text}")
-                    if resp.content_length:
-                        return await resp.json()
-                    return {}
+                    # Don't gate on resp.content_length: it reflects the
+                    # Content-Length *header*, which is absent for chunked
+                    # responses -- Avito's API returns those, and the header
+                    # check was silently discarding real JSON bodies (found
+                    # via a live account: every call "succeeded" with 0
+                    # results, no error, because this always took the empty
+                    # branch). Read the actual body instead.
+                    body = await resp.read()
+                    if not body:
+                        return {}
+                    return json.loads(body)
             except aiohttp.ClientError as exc:
                 last_error = exc
                 await asyncio.sleep(backoff)
