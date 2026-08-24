@@ -951,30 +951,46 @@ async def cb_admin_sync_points(callback: CallbackQuery) -> None:
     await callback.answer("Синк запущен…")
     accounts = await database.list_avito_accounts(active_only=True)
     seen_coords = 0
+    report_lines: list[str] = []
     for account in accounts:
         client = avito_client.get_pool().get(account.id)
         if client is None:
+            report_lines.append(f"⚠️ {account.name}: клиент недоступен (перезапустите бота после добавления аккаунта)")
             continue
+
         offset = 0
+        account_chats = 0
+        account_coords = 0
+        error_text: str | None = None
         while True:
             try:
                 chats = await client.get_chats(limit=100, offset=offset)
-            except avito_client.AvitoAPIError:
+            except avito_client.AvitoAPIError as exc:
+                error_text = str(exc)
                 break
             if not chats:
                 break
+            account_chats += len(chats)
             for chat in chats:
                 if chat.item_lat is None or chat.item_lon is None:
                     continue
+                account_coords += 1
                 seen_coords += 1
                 name = chat.location_title or chat.item_title or f"Точка {chat.item_lat:.4f},{chat.item_lon:.4f}"
                 await database.upsert_point_from_avito(name=name, address=None, lat=chat.item_lat, lon=chat.item_lon)
             if len(chats) < 100:
                 break
             offset += 100
+
+        line = f"{account.name}: чатов {account_chats}, с координатами {account_coords}"
+        if error_text:
+            line += f" — ⚠️ ОШИБКА: {error_text}"
+        report_lines.append(line)
+
     points = await database.list_points()
     await callback.message.answer(
-        f"🗺 Синк завершён: обработано координат из чатов — {seen_coords}, точек в базе сейчас — {len(points)}.\n"
+        "🗺 Синк завершён:\n" + "\n".join(report_lines) +
+        f"\n\nВсего координат обработано: {seen_coords}, точек в базе сейчас: {len(points)}.\n"
         f"Проверьте список в «🏢 Настройки подразделений» — названия можно переименовать, "
         f"это уже не перезапишется следующим синком."
     )
