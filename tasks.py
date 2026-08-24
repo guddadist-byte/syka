@@ -64,10 +64,17 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     point = await database.resolve_point_for_item(chat.item_id, chat.item_lat, chat.item_lon)
     point_id = point.id if point else None
 
+    # Read the durable count before touching bot_cache — if this chat isn't
+    # in the in-memory cache yet (e.g. right after a restart), upsert_chat
+    # seeds its unread_count from this instead of defaulting to 0.
+    existing_summary = await database.get_chat_summary(chat.chat_id)
+    initial_unread = existing_summary.unread_count if existing_summary else 0
+
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
         item_title=chat.item_title, item_url=chat.item_url,
+        initial_unread_count=initial_unread,
     )
     await database.upsert_chat_summary(
         chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
