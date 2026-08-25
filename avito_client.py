@@ -199,7 +199,14 @@ class AvitoClient:
         raise AvitoAPIError(f"{method} {path} failed after retries: {last_error}")
 
     async def get_chats(self, unread_only: bool = False, limit: int = 100, offset: int = 0) -> list[models.AvitoChat]:
-        params = {"limit": limit, "offset": offset}
+        # chat_types defaults to "u2i" (item-tied chats) *server-side* if
+        # omitted (confirmed in Avito's own API docs) — without spelling it
+        # out, direct-to-profile messages (u2u, no item_id) would never
+        # come back from this endpoint at all, silently starving the
+        # fallback-point feature that exists specifically to handle them.
+        # a2u (Avito's own system/support chats) is deliberately left out —
+        # that's not a customer conversation.
+        params = {"limit": limit, "offset": offset, "chat_types": "u2i,u2u"}
         if unread_only:
             params["unread_only"] = "true"
         data = await self._request("GET", f"/messenger/v2/accounts/{self.avito_user_id}/chats", params=params)
@@ -239,15 +246,35 @@ class AvitoClient:
             f"/messenger/v3/accounts/{self.avito_user_id}/chats/{chat_id}/messages/",
             params={"limit": limit},
         )
+        # Avito's own API docs show this endpoint returning a bare JSON
+        # array, not {"messages": [...]} — accept either shape so a
+        # documented-but-unverified response format can't silently crash
+        # the poller (an AttributeError here isn't an AvitoAPIError, so
+        # _process_chat's narrow except wouldn't catch it).
+        raw_messages = data if isinstance(data, list) else data.get("messages", [])
         messages = []
-        for raw in data.get("messages", []):
+        for raw in raw_messages:
             content = raw.get("content") or {}
             created = raw.get("created")
+            text = content.get("text", "")
+            if not text:
+                # Non-text content types (confirmed in Avito's docs: voice,
+                # missed call, shared link) leave "text" empty — without a
+                # placeholder here, every one of these renders and previews
+                # as "(фото)" downstream, which is simply wrong for
+                # anything that isn't actually an image.
+                if "voice" in content:
+                    text = "🎤 Голосовое сообщение"
+                elif "call" in content:
+                    text = "📞 Пропущенный звонок"
+                elif "link" in content:
+                    link = content["link"]
+                    text = f"🔗 {link.get('text') or link.get('url') or 'Ссылка'}"
             messages.append(
                 models.AvitoMessage(
                     message_id=raw["id"],
                     direction="in" if raw.get("direction") == "in" else "out",
-                    text=content.get("text", ""),
+                    text=text,
                     has_image="image" in content,
                     created_at=(utils.utcnow_str() if created is None
                                 else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),
