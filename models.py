@@ -193,6 +193,7 @@ class ChatSummary:
     last_replied_by: int | None
     last_replied_at: str | None
     updated_at: str
+    read_at: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "ChatSummary":

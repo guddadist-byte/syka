@@ -49,6 +49,7 @@ class CachedChat:
     last_message_at: datetime | None = None
     last_replied_at: datetime | None = None
     last_replied_by: int | None = None
+    last_read_at: datetime | None = None
 
 
 _chats: dict[str, CachedChat] = {}
@@ -86,7 +87,7 @@ async def get_short_id(chat_id: str) -> str:
         return short_id
 
 
-def _trailing_unread(messages: "deque[CachedMessage]") -> int:
+def _trailing_unread(messages: "deque[CachedMessage]", read_before: datetime | None = None) -> int:
     """Count of client ("in") messages since the last staff reply.
 
     Avito's chat-list API has no unread/read field at all (confirmed live:
@@ -96,10 +97,17 @@ def _trailing_unread(messages: "deque[CachedMessage]") -> int:
     real message history every time, so it self-corrects the moment *any*
     reply lands as the newest message, whether sent through this bot or
     directly in Avito's own app/website.
+
+    `read_before` is the second boundary besides "last out-reply": a chat
+    can be marked read (see mark_read) without an actual reply, and that
+    boundary has to stop the trailing count too, or the next incoming
+    message would drag every already-dismissed message back into "unread".
     """
     count = 0
     for m in reversed(messages):
         if m.direction != "in":
+            break
+        if read_before is not None and m.created_at <= read_before:
             break
         count += 1
     return count
@@ -108,7 +116,8 @@ def _trailing_unread(messages: "deque[CachedMessage]") -> int:
 async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: int,
                        client_name: str, item_id: str | None = None,
                        item_title: str | None = None, item_url: str | None = None,
-                       initial_messages: list[CachedMessage] | None = None) -> CachedChat:
+                       initial_messages: list[CachedMessage] | None = None,
+                       read_at: datetime | None = None) -> CachedChat:
     async with _lock:
         chat = _chats.get(chat_id)
         if chat is None:
@@ -117,7 +126,9 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
             # messages were all persisted before the restart would come
             # back with an empty dialog (add_message is never called again
             # for a message tasks.py already knows), even though the DB
-            # has the real history.
+            # has the real history. read_at is the same idea for the
+            # "marked read without replying" boundary — without seeding it
+            # too, every such chat would come back as unread on restart.
             short_id = _make_short_id(chat_id)
             chat = CachedChat(
                 chat_id=chat_id,
@@ -128,11 +139,12 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 item_id=item_id,
                 item_title=item_title,
                 item_url=item_url,
+                last_read_at=read_at,
             )
             if initial_messages:
                 chat.messages.extend(initial_messages)
                 chat.last_message_at = chat.messages[-1].created_at
-                chat.unread_count = _trailing_unread(chat.messages)
+                chat.unread_count = _trailing_unread(chat.messages, read_at)
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:
@@ -181,7 +193,7 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
                     return False
         chat.messages.append(message)
         chat.last_message_at = message.created_at
-        chat.unread_count = _trailing_unread(chat.messages)
+        chat.unread_count = _trailing_unread(chat.messages, chat.last_read_at)
         return True
 
 
@@ -190,6 +202,7 @@ async def mark_read(chat_id: str) -> None:
         chat = _chats.get(chat_id)
         if chat is not None:
             chat.unread_count = 0
+            chat.last_read_at = chat.last_message_at or datetime.utcnow()
 
 
 async def mark_replied(chat_id: str, by_user_id: int) -> None:

@@ -92,10 +92,11 @@ async def hydrate_cache_from_db() -> None:
     """
     for chat in await database.list_all_chats():
         initial_messages = await _build_initial_messages(chat.chat_id)
+        read_at = utils.parse_utc(chat.read_at) if chat.read_at else None
         await bot_cache.upsert_chat(
             chat.chat_id, point_id=chat.point_id, avito_account_id=chat.avito_account_id,
             client_name=chat.client_name or "", item_id=chat.item_id,
-            initial_messages=initial_messages,
+            initial_messages=initial_messages, read_at=read_at,
         )
 
 
@@ -116,13 +117,19 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     # DB round trip only happens once per chat per process lifetime (only
     # when it's not cached yet), not every poll.
     was_cached = await bot_cache.get_chat(chat.chat_id) is not None
-    initial_messages = [] if was_cached else await _build_initial_messages(chat.chat_id)
+    initial_messages: list[bot_cache.CachedMessage] = []
+    read_at = None
+    if not was_cached:
+        initial_messages = await _build_initial_messages(chat.chat_id)
+        summary = await database.get_chat_summary(chat.chat_id)
+        if summary is not None and summary.read_at:
+            read_at = utils.parse_utc(summary.read_at)
 
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
         item_title=chat.item_title, item_url=chat.item_url,
-        initial_messages=initial_messages,
+        initial_messages=initial_messages, read_at=read_at,
     )
     await database.set_chat_unread_count(chat.chat_id, cached.unread_count)
     await database.upsert_chat_summary(

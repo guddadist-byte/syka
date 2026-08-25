@@ -827,12 +827,21 @@ async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int
 
 
 async def set_chat_unread_count(chat_id: str, unread_count: int) -> None:
-    await _execute("UPDATE chats SET unread_count = ? WHERE chat_id = ?", (unread_count, chat_id))
+    if unread_count == 0:
+        await _execute(
+            "UPDATE chats SET unread_count = 0, read_at = datetime('now') WHERE chat_id = ?", (chat_id,)
+        )
+    else:
+        await _execute("UPDATE chats SET unread_count = ? WHERE chat_id = ?", (unread_count, chat_id))
 
 
 async def mark_chat_replied(chat_id: str, user_id: int) -> None:
     await _execute(
-        "UPDATE chats SET unread_count = 0, last_replied_by = ?, last_replied_at = datetime('now') WHERE chat_id = ?",
+        """
+        UPDATE chats SET unread_count = 0, last_replied_by = ?, last_replied_at = datetime('now'),
+               read_at = datetime('now')
+        WHERE chat_id = ?
+        """,
         (user_id, chat_id),
     )
 
