@@ -192,7 +192,19 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
                 if existing.avito_message_id == message.avito_message_id:
                     return False
         chat.messages.append(message)
-        chat.last_message_at = message.created_at
+        if len(chat.messages) > 1 and chat.messages[-2].created_at > message.created_at:
+            # Out-of-order arrival: e.g. a reply sent through this bot gets
+            # appended in real time, and moments later the poller discovers
+            # a client message that was actually sent (by created_at)
+            # *before* that reply but only just got fetched from Avito.
+            # Rendering/unread-counting both trust append order to be
+            # chronological, so a blind append here would show "my reply"
+            # as the last line even while notifying about a newer client
+            # message — re-sort instead of trusting arrival order.
+            ordered = sorted(chat.messages, key=lambda m: m.created_at)
+            chat.messages.clear()
+            chat.messages.extend(ordered)
+        chat.last_message_at = max(chat.last_message_at or message.created_at, message.created_at)
         chat.unread_count = _trailing_unread(chat.messages, chat.last_read_at)
         return True
 
