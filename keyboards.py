@@ -15,7 +15,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 import constants
 from bot_cache import CachedChat
 from constants import ROLE_LABELS
-from models import PendingNotification, Point, Template, User
+from models import Point, Template, User
 
 
 # --- main menu ---------------------------------------------------------------
@@ -180,7 +180,6 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
-    builder.row(InlineKeyboardButton(text="🔕 Тихий режим", callback_data="adm_quiethours"))
     return builder.as_markup()
 
 
@@ -192,7 +191,6 @@ def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
-    builder.row(InlineKeyboardButton(text="🔕 Тихий режим", callback_data="adm_quiethours"))
     return builder.as_markup()
 
 
@@ -319,27 +317,6 @@ def backup_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="⏱ Периодичность", callback_data="adm_backupinterval"))
     builder.row(InlineKeyboardButton(text="📤 Сделать бэкап сейчас", callback_data="adm_backupnow"))
-    return builder.as_markup()
-
-
-def quiet_hours_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        InlineKeyboardButton(
-            text="🔴 Выключить" if is_enabled else "🟢 Включить", callback_data="adm_quiethourstoggle"
-        )
-    )
-    return builder.as_markup()
-
-
-def quiet_hours_digest_kb(items: list[PendingNotification]) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for item in items:
-        builder.row(
-            InlineKeyboardButton(
-                text=f"💬 {item.client_name or 'Клиент'}", callback_data=f"{constants.PREFIX_CHAT}_{item.short_id}"
-            )
-        )
     return builder.as_markup()
 
 

@@ -180,33 +180,6 @@ class BackupConfig:
 
 
 @dataclass
-class QuietHoursConfig:
-    id: int
-    is_enabled: int
-    updated_at: str
-    updated_by: int | None
-
-    @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "QuietHoursConfig":
-        return _row(cls, row)
-
-
-@dataclass
-class PendingNotification:
-    id: int
-    telegram_id: int
-    chat_id: str
-    short_id: str
-    client_name: str | None
-    preview_text: str | None
-    created_at: str
-
-    @classmethod
-    def from_row(cls, row: Mapping[str, Any]) -> "PendingNotification":
-        return _row(cls, row)
-
-
-@dataclass
 class ChatSummary:
     chat_id: str
     avito_account_id: int

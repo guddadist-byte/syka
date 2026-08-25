@@ -781,54 +781,6 @@ async def mark_backup_done(at: datetime) -> None:
     )
 
 
-# --- quiet hours -----------------------------------------------------------
-
-
-async def get_quiet_hours_config() -> models.QuietHoursConfig:
-    row = await _fetchone("SELECT * FROM quiet_hours_config WHERE id = 1")
-    assert row is not None
-    return models.QuietHoursConfig.from_row(row)
-
-
-async def update_quiet_hours_config(actor_id: int | None = None, **fields: Any) -> None:
-    if not fields:
-        return
-    fields["updated_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    if actor_id is not None:
-        fields["updated_by"] = actor_id
-    columns = ", ".join(f"{k} = ?" for k in fields)
-    await _execute(f"UPDATE quiet_hours_config SET {columns} WHERE id = 1", tuple(fields.values()))
-
-
-async def queue_pending_notification(telegram_id: int, chat_id: str, short_id: str,
-                                      client_name: str | None, preview_text: str | None) -> None:
-    await _execute(
-        """
-        INSERT INTO pending_notifications (telegram_id, chat_id, short_id, client_name, preview_text)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (telegram_id, chat_id, short_id, client_name, preview_text),
-    )
-
-
-async def list_users_with_pending_notifications() -> list[int]:
-    rows = await _fetchall("SELECT DISTINCT telegram_id FROM pending_notifications")
-    return [int(r["telegram_id"]) for r in rows]
-
-
-async def pop_pending_notifications(telegram_id: int) -> list[models.PendingNotification]:
-    """Fetches and deletes (atomically enough for our single-writer-lock
-    setup) all queued notifications for a user, oldest first."""
-    rows = await _fetchall(
-        "SELECT * FROM pending_notifications WHERE telegram_id = ? ORDER BY created_at",
-        (telegram_id,),
-    )
-    items = [models.PendingNotification.from_row(r) for r in rows]
-    if items:
-        await _execute("DELETE FROM pending_notifications WHERE telegram_id = ?", (telegram_id,))
-    return items
-
-
 # --- chats / messages ------------------------------------------------------
 
 
@@ -874,14 +826,8 @@ async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int
     )
 
 
-async def _clear_pending_notifications_for_chat(chat_id: str) -> None:
-    await _execute("DELETE FROM pending_notifications WHERE chat_id = ?", (chat_id,))
-
-
 async def set_chat_unread_count(chat_id: str, unread_count: int) -> None:
     await _execute("UPDATE chats SET unread_count = ? WHERE chat_id = ?", (unread_count, chat_id))
-    if unread_count == 0:
-        await _clear_pending_notifications_for_chat(chat_id)
 
 
 async def mark_chat_replied(chat_id: str, user_id: int) -> None:
@@ -889,7 +835,6 @@ async def mark_chat_replied(chat_id: str, user_id: int) -> None:
         "UPDATE chats SET unread_count = 0, last_replied_by = ?, last_replied_at = datetime('now') WHERE chat_id = ?",
         (user_id, chat_id),
     )
-    await _clear_pending_notifications_for_chat(chat_id)
 
 
 async def get_recent_chats(point_ids: set[int] | None, within_minutes: int = constants.RECENT_REPLIES_WINDOW_MINUTES) -> list[models.ChatSummary]:

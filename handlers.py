@@ -1847,28 +1847,6 @@ async def cb_admin_backup_toggle(callback: CallbackQuery) -> None:
     await callback.message.answer("Готово.")
 
 
-@admin_router.callback_query(F.data == "adm_quiethours")
-async def cb_admin_quiethours(callback: CallbackQuery) -> None:
-    await callback.answer()
-    cfg = await database.get_quiet_hours_config()
-    text = (
-        f"🔕 Тихий режим: {'включён' if cfg.is_enabled else 'выключен'}\n\n"
-        "Пока ни одна из подписанных точек сотрудника не открыта — уведомления "
-        "не шлются, а копятся и приходят одним списком, как только точка "
-        "откроется (если точек несколько — по самой ранней). Круглосуточные "
-        "точки уведомляют как обычно, без задержки."
-    )
-    await callback.message.answer(text, reply_markup=keyboards.quiet_hours_settings_kb(bool(cfg.is_enabled)))
-
-
-@admin_router.callback_query(F.data == "adm_quiethourstoggle")
-async def cb_admin_quiethours_toggle(callback: CallbackQuery) -> None:
-    await callback.answer()
-    cfg = await database.get_quiet_hours_config()
-    await database.update_quiet_hours_config(actor_id=callback.from_user.id, is_enabled=0 if cfg.is_enabled else 1)
-    await callback.message.answer("Готово.")
-
-
 @admin_router.callback_query(F.data == "adm_backupinterval")
 async def cb_admin_backup_interval_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()

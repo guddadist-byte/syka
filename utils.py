@@ -12,14 +12,12 @@ from __future__ import annotations
 import fcntl
 import math
 import os
-import re
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import IO
 
 from constants import MSK_OFFSET_HOURS
 
 _ISO_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f")
-_HOURS_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*[-–—]\s*(\d{1,2}):(\d{2})\s*$")
 
 
 def parse_utc(value: str) -> datetime:
@@ -55,38 +53,6 @@ def next_msk_morning(now_utc: datetime, hour: int = 9) -> datetime:
     if candidate_msk <= now_msk:
         candidate_msk += timedelta(days=1)
     return candidate_msk - timedelta(hours=MSK_OFFSET_HOURS)
-
-
-def parse_working_hours(text: str | None) -> tuple[time, time] | None:
-    """Parses a free-text working-hours string like "9:00-20:00" into
-    (open, close) MSK wall-clock times. Returns None for "Круглосуточно",
-    blank, or anything unparseable — treated as always-open, so a bad or
-    missing value never silently swallows a notification.
-    """
-    if not text:
-        return None
-    match = _HOURS_RE.match(text)
-    if not match:
-        return None
-    oh, om, ch, cm = (int(g) for g in match.groups())
-    if not (0 <= oh <= 23 and 0 <= om <= 59 and 0 <= ch <= 23 and 0 <= cm <= 59):
-        return None
-    return time(oh, om), time(ch, cm)
-
-
-def is_point_open_now(working_hours: str | None) -> bool:
-    """Whether a point (given its stored working_hours text) is open right
-    now, in MSK wall-clock time. Always-open (24/7 or unparseable) -> True.
-    """
-    hours = parse_working_hours(working_hours)
-    if hours is None:
-        return True
-    open_t, close_t = hours
-    now_t = (datetime.utcnow() + timedelta(hours=MSK_OFFSET_HOURS)).time()
-    if open_t <= close_t:
-        return open_t <= now_t <= close_t
-    # Wraps past midnight, e.g. 22:00-02:00.
-    return now_t >= open_t or now_t <= close_t
 
 
 def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
