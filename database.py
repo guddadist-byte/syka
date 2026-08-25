@@ -874,8 +874,14 @@ async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int
     )
 
 
+async def _clear_pending_notifications_for_chat(chat_id: str) -> None:
+    await _execute("DELETE FROM pending_notifications WHERE chat_id = ?", (chat_id,))
+
+
 async def set_chat_unread_count(chat_id: str, unread_count: int) -> None:
     await _execute("UPDATE chats SET unread_count = ? WHERE chat_id = ?", (unread_count, chat_id))
+    if unread_count == 0:
+        await _clear_pending_notifications_for_chat(chat_id)
 
 
 async def mark_chat_replied(chat_id: str, user_id: int) -> None:
@@ -883,6 +889,7 @@ async def mark_chat_replied(chat_id: str, user_id: int) -> None:
         "UPDATE chats SET unread_count = 0, last_replied_by = ?, last_replied_at = datetime('now') WHERE chat_id = ?",
         (user_id, chat_id),
     )
+    await _clear_pending_notifications_for_chat(chat_id)
 
 
 async def get_recent_chats(point_ids: set[int] | None, within_minutes: int = constants.RECENT_REPLIES_WINDOW_MINUTES) -> list[models.ChatSummary]:
