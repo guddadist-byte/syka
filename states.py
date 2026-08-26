@@ -81,3 +81,4 @@ class AdminStates(StatesGroup):
     waiting_for_cnc_address = State()
     waiting_for_cnc_period = State()
     waiting_for_cnc_comment = State()
+    waiting_for_order_confirm_code = State()

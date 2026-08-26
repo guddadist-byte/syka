@@ -64,6 +64,7 @@ BTN_RECENT = "🕒 Недавние"
 BTN_PROFILE = "👤 Мой профиль"
 BTN_MY_POINTS = "📍 Мои точки"
 BTN_MY_TEMPLATES = "📋 Мои шаблоны"
+BTN_ORDERS = "📦 Заказы Avito"
 BTN_ADMIN_PANEL = "⚙️ Админпанель"
 BTN_LEADERSHIP = "👔 Меню руководителя"
 BTN_CANCEL = "❌ Отмена"
@@ -83,6 +84,7 @@ ALL_KNOWN_BUTTON_TEXTS: frozenset[str] = frozenset(
         BTN_PROFILE,
         BTN_MY_POINTS,
         BTN_MY_TEMPLATES,
+        BTN_ORDERS,
         BTN_ADMIN_PANEL,
         BTN_LEADERSHIP,
         BTN_CANCEL,

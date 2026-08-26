@@ -29,6 +29,7 @@ def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
         KeyboardButton(text=constants.BTN_RECENT),
     )
     builder.row(KeyboardButton(text=constants.BTN_PROFILE), KeyboardButton(text=constants.BTN_MY_POINTS))
+    builder.row(KeyboardButton(text=constants.BTN_ORDERS))
     if role == constants.MANAGER:
         builder.row(KeyboardButton(text=constants.BTN_MY_TEMPLATES))
     if constants.ROLE_ORDER.get(role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
@@ -181,7 +182,6 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
     builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
-    builder.row(InlineKeyboardButton(text="📦 Заказы Avito", callback_data="adm_orders"))
     return builder.as_markup()
 
 
@@ -194,7 +194,6 @@ def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
     builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
-    builder.row(InlineKeyboardButton(text="📦 Заказы Avito", callback_data="adm_orders"))
     return builder.as_markup()
 
 
@@ -344,11 +343,19 @@ def review_reply_kb(unanswered: list[tuple[int, str]], account_id: int) -> Inlin
     return builder.as_markup()
 
 
-def order_list_kb(orders: list[dict], account_id: int) -> InlineKeyboardMarkup:
+def order_list_kb(orders_with_accounts: list[tuple[dict, int]]) -> InlineKeyboardMarkup:
     """One button per order per entry in its `availableActions` — built from
     what Avito actually says is possible for that order, not hardcoded per
     delivery type (the pvz/dbs/rdbs/courier/cnc/postamat action table in
-    Avito's docs couldn't be reliably extracted column-by-column)."""
+    Avito's docs couldn't be reliably extracted column-by-column). Orders
+    are shown aggregated across every Avito account, so each one carries
+    its own account_id rather than a single shared one.
+
+    checkConfirmationCode and shipping-label generation aren't in
+    availableActions at all (per Avito's docs neither is order-scoped the
+    same way) — shown for pvz orders specifically, since both are
+    documented as pvz-only.
+    """
     builder = InlineKeyboardBuilder()
     action_labels = {
         "confirm": "✅ Подтвердить",
@@ -356,7 +363,7 @@ def order_list_kb(orders: list[dict], account_id: int) -> InlineKeyboardMarkup:
         "setMarkings": "🏷 Маркировка",
         "setCNCDetails": "📍 Подготовить самовывоз",
     }
-    for order in orders:
+    for order, account_id in orders_with_accounts:
         order_id = order.get("id")
         row = []
         for action in order.get("availableActions") or []:
@@ -372,6 +379,13 @@ def order_list_kb(orders: list[dict], account_id: int) -> InlineKeyboardMarkup:
             row.append(InlineKeyboardButton(text=action_labels[name], callback_data=callback_data))
         if row:
             builder.row(*row)
+
+        if (order.get("delivery") or {}).get("serviceType") == "pvz":
+            pvz_row = [
+                InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"),
+                InlineKeyboardButton(text="🏷 Этикетка", callback_data=f"ordlabel_{order_id}:{account_id}"),
+            ]
+            builder.row(*pvz_row)
     return builder.as_markup()
 
 

@@ -391,6 +391,34 @@ class AvitoClient:
             body["details"] = details
         return await self._request("POST", "/order-management/1/order/cncSetDetails", json=body)
 
+    async def check_confirmation_code(self, parcel_id: str, confirm_code: str) -> dict:
+        return await self._request(
+            "POST", "/order-management/1/order/checkConfirmationCode",
+            json={"parcelID": parcel_id, "confirmCode": confirm_code},
+        )
+
+    async def create_shipping_labels_task(self, order_ids: list[str]) -> str:
+        data = await self._request("POST", "/order-management/1/orders/labels", json={"orderIDs": order_ids})
+        return data["taskID"]
+
+    async def download_shipping_label(self, task_id: str) -> bytes | None:
+        """The PDF once generation finishes, or None while it's still
+        running (Avito's docs don't spell out task-polling semantics
+        explicitly — a 404 on the download endpoint is treated as "not
+        ready yet" rather than a real error; anything else 4xx/5xx isn't).
+        Bypasses _request()'s JSON decoding since this returns a PDF body.
+        """
+        await self._throttle()
+        token = await self._ensure_token()
+        url = f"{AVITO_BASE_URL}/order-management/1/orders/labels/{task_id}/download"
+        async with self._session.get(url, headers={"Authorization": f"Bearer {token}"}) as resp:
+            if resp.status == 404:
+                return None
+            if resp.status >= 400:
+                text = await resp.text()
+                raise AvitoAPIError(f"download_shipping_label -> {resp.status}: {text}")
+            return await resp.read()
+
 
 class AvitoClientPool:
     def __init__(self, session: aiohttp.ClientSession) -> None:

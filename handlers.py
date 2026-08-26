@@ -21,6 +21,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import BaseStorage, StorageKey
 from aiogram.types import (
+    BufferedInputFile,
     CallbackQuery,
     FSInputFile,
     ForceReply,
@@ -1980,74 +1981,71 @@ async def receive_review_answer(message: Message, state: FSMContext) -> None:
     await message.answer("✅ Ответ отправлен.")
 
 
-# --- orders (📦 Заказы Avito, ПВЗ/Самовывоз) ---------------------------------
+# --- orders (📦 Заказы Avito, ПВЗ/Самовывоз) — open to every approved user,
+# aggregated across every Avito account, filtered by the viewer's own point
+# subscriptions (same rule as "📩 Непрочитанные"/"🕒 Недавние") --------------
 
-@admin_router.callback_query(F.data == "adm_orders")
-async def cb_admin_orders(callback: CallbackQuery) -> None:
-    await callback.answer()
+@menu_router.message(F.text == constants.BTN_ORDERS, StateFilter("*"), ApprovedUser())
+async def show_orders_menu(message: Message) -> None:
+    await _show_all_orders(message, message.from_user.id)
+
+
+async def _show_all_orders(message: Message, actor_id: int) -> None:
     accounts = await database.list_avito_accounts(active_only=True)
     if not accounts:
-        await callback.message.answer("Нет подключённых Avito-аккаунтов.")
-        return
-    if len(accounts) == 1:
-        await _show_orders(callback.message, accounts[0].id, callback.from_user.id)
-        return
-    await callback.message.answer(
-        "📦 Выберите аккаунт Avito:", reply_markup=keyboards.avito_account_picker_kb(accounts, "adm_ordersacc")
-    )
-
-
-@admin_router.callback_query(F.data.startswith("adm_ordersacc_"))
-async def cb_admin_orders_account(callback: CallbackQuery) -> None:
-    await callback.answer()
-    account_id = int(callback.data.rsplit("_", 1)[1])
-    await _show_orders(callback.message, account_id, callback.from_user.id)
-
-
-async def _show_orders(message: Message, account_id: int, actor_id: int) -> None:
-    client = avito_client.get_pool().get(account_id)
-    if client is None:
-        await message.answer("⚠️ Аккаунт Avito недоступен.")
-        return
-    try:
-        orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
-    except avito_client.AvitoAPIError as exc:
-        logger.exception("_show_orders: failed for account %s", account_id)
-        await message.answer(f"⚠️ Не удалось получить заказы от Avito: {exc}")
+        await message.answer("Нет подключённых Avito-аккаунтов.")
         return
 
-    # Same rule as "📩 Непрочитанные"/"🕒 Недавние" — strictly by "Мои
-    # точки" subscription, for every role including Director; an order
-    # whose point we can't resolve at all (see database.resolve_order_point_id)
-    # is excluded here too, same as it staying silent for push notifications.
     actor = await database.get_user(actor_id)
     point_ids = await _point_ids_for_user(actor) if actor else set()
-    filtered = []
-    for order in orders:
-        point_id = await database.resolve_order_point_id(order)
-        if point_id in point_ids:
-            filtered.append(order)
-    orders = filtered
 
-    if not orders:
-        await message.answer("📦 Активных заказов нет.")
+    shown: list[tuple[dict, int, str]] = []
+    errors: list[str] = []
+    for account in accounts:
+        client = avito_client.get_pool().get(account.id)
+        if client is None:
+            continue
+        try:
+            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
+        except avito_client.AvitoAPIError as exc:
+            logger.exception("_show_all_orders: failed for account %s", account.id)
+            errors.append(f"{account.name}: {exc}")
+            continue
+        for order in orders:
+            point_id = await database.resolve_order_point_id(order)
+            if point_id in point_ids:
+                shown.append((order, account.id, account.name))
+
+    if not shown:
+        text = "📦 Активных заказов нет."
+        if errors:
+            text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
+        await message.answer(text)
         return
 
     lines = []
-    for order in orders:
+    for order, _account_id, account_name in shown:
         status = order.get("status", "")
         status_label = constants.ORDER_STATUS_LABELS.get(status, status)
         items = order.get("items") or []
         titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
-        delivery = (order.get("delivery") or {}).get("serviceType", "")
+        delivery_info = order.get("delivery") or {}
+        service = delivery_info.get("serviceName") or delivery_info.get("serviceType", "")
         total = (order.get("prices") or {}).get("total")
-        lines.append(f"{status_label} · {delivery}\n📦 {titles}" + (f"\n💰 {total} ₽" if total is not None else ""))
+        lines.append(
+            f"🏢 {html.escape(account_name)} · {status_label}\n📦 {titles}"
+            + (f"\n🚚 {html.escape(service)}" if service else "")
+            + (f"\n💰 {total} ₽" if total is not None else "")
+        )
         lines.append("")
+    if errors:
+        lines.append("⚠️ Не удалось получить заказы от:\n" + "\n".join(errors))
 
-    await message.answer("\n".join(lines).strip(), reply_markup=keyboards.order_list_kb(orders, account_id))
+    kb = keyboards.order_list_kb([(order, account_id) for order, account_id, _name in shown])
+    await message.answer("\n".join(lines).strip(), reply_markup=kb)
 
 
-@admin_router.callback_query(F.data.startswith("ordact_"))
+@crm_router.callback_query(F.data.startswith("ordact_"))
 async def cb_order_action(callback: CallbackQuery) -> None:
     await callback.answer()
     _, payload = callback.data.split("_", 1)
@@ -2063,10 +2061,10 @@ async def cb_order_action(callback: CallbackQuery) -> None:
         await callback.message.answer(f"⚠️ Avito отклонил это действие: {exc}")
         return
     await callback.message.answer("✅ Готово.")
-    await _show_orders(callback.message, int(account_id_str), callback.from_user.id)
+    await _show_all_orders(callback.message, callback.from_user.id)
 
 
-@admin_router.callback_query(F.data.startswith("ordmark_"))
+@crm_router.callback_query(F.data.startswith("ordmark_"))
 async def cb_order_markings_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     _, payload = callback.data.split("_", 1)
@@ -2078,7 +2076,7 @@ async def cb_order_markings_start(callback: CallbackQuery, state: FSMContext) ->
     )
 
 
-@admin_router.message(AdminStates.waiting_for_order_markings, SafeFreeText())
+@crm_router.message(AdminStates.waiting_for_order_markings, SafeFreeText())
 async def receive_order_markings(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     order_id = data.get("order_id")
@@ -2103,7 +2101,7 @@ async def receive_order_markings(message: Message, state: FSMContext) -> None:
     await message.answer("✅ Маркировка передана.")
 
 
-@admin_router.callback_query(F.data.startswith("ordcnc_"))
+@crm_router.callback_query(F.data.startswith("ordcnc_"))
 async def cb_order_cnc_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     _, payload = callback.data.split("_", 1)
@@ -2122,14 +2120,14 @@ async def cb_order_cnc_start(callback: CallbackQuery, state: FSMContext) -> None
     await callback.message.answer("📍 Введите адрес получения товара:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_cnc_address, SafeFreeText())
+@crm_router.message(AdminStates.waiting_for_cnc_address, SafeFreeText())
 async def receive_cnc_address(message: Message, state: FSMContext) -> None:
     await state.update_data(cnc_address=message.text.strip())
     await state.set_state(AdminStates.waiting_for_cnc_period)
     await message.answer("Введите срок бронирования товара в днях:")
 
 
-@admin_router.message(AdminStates.waiting_for_cnc_period, SafeFreeText())
+@crm_router.message(AdminStates.waiting_for_cnc_period, SafeFreeText())
 async def receive_cnc_period(message: Message, state: FSMContext) -> None:
     try:
         period = int(message.text.strip())
@@ -2141,7 +2139,7 @@ async def receive_cnc_period(message: Message, state: FSMContext) -> None:
     await message.answer("Комментарий для покупателя (или «-», чтобы пропустить):")
 
 
-@admin_router.message(AdminStates.waiting_for_cnc_comment, SafeFreeText())
+@crm_router.message(AdminStates.waiting_for_cnc_comment, SafeFreeText())
 async def receive_cnc_comment(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
@@ -2163,3 +2161,75 @@ async def receive_cnc_comment(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Avito отклонил подготовку заказа: {exc}")
         return
     await message.answer("✅ Заказ подготовлен.")
+
+
+@crm_router.callback_query(F.data.startswith("ordcode_"))
+async def cb_order_confirm_code_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    client = avito_client.get_pool().get(int(account_id_str))
+    parcel_id = None
+    if client is not None:
+        try:
+            orders = await client.get_orders()
+            order = next((o for o in orders if o.get("id") == order_id), None)
+            parcel_id = (order.get("delivery") or {}).get("dispatchNumber") if order else None
+        except avito_client.AvitoAPIError:
+            pass
+    if parcel_id is None:
+        await callback.message.answer("⚠️ Не удалось определить номер посылки для этого заказа.")
+        return
+    await state.set_state(AdminStates.waiting_for_order_confirm_code)
+    await state.update_data(order_confirm_parcel_id=parcel_id, order_account_id=int(account_id_str))
+    await callback.message.answer(
+        "✅ Введите код, который назвал покупатель при получении:", reply_markup=keyboards.cancel_kb()
+    )
+
+
+@crm_router.message(AdminStates.waiting_for_order_confirm_code, SafeFreeText())
+async def receive_order_confirm_code(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    parcel_id = data.get("order_confirm_parcel_id")
+    account_id = data.get("order_account_id")
+    await state.clear()
+    client = avito_client.get_pool().get(account_id) if account_id is not None else None
+    if client is None or parcel_id is None:
+        await message.answer("⚠️ Не удалось проверить код.")
+        return
+    try:
+        await client.check_confirmation_code(parcel_id, message.text.strip())
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("receive_order_confirm_code: failed")
+        await message.answer(f"⚠️ Код не подошёл: {exc}")
+        return
+    await message.answer("✅ Код подтверждён, заказ можно выдавать.")
+
+
+@crm_router.callback_query(F.data.startswith("ordlabel_"))
+async def cb_order_label(callback: CallbackQuery) -> None:
+    await callback.answer("Генерирую этикетку…")
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    client = avito_client.get_pool().get(int(account_id_str))
+    if client is None:
+        await callback.message.answer("⚠️ Аккаунт Avito недоступен.")
+        return
+    try:
+        task_id = await client.create_shipping_labels_task([order_id])
+        pdf_bytes = None
+        for _attempt in range(3):
+            pdf_bytes = await client.download_shipping_label(task_id)
+            if pdf_bytes is not None:
+                break
+            await asyncio.sleep(2)
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("cb_order_label: failed for order %s", order_id)
+        await callback.message.answer(f"⚠️ Avito отклонил генерацию этикетки: {exc}")
+        return
+    if pdf_bytes is None:
+        await callback.message.answer("⏳ Этикетка ещё генерируется, нажмите «🏷 Этикетка» ещё раз через минуту.")
+        return
+    await callback.message.answer_document(
+        BufferedInputFile(pdf_bytes, filename=f"label_{order_id}.pdf"), caption="🏷 Этикетка для отправки"
+    )
