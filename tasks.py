@@ -304,12 +304,67 @@ async def _backup_loop(bot: Bot, db_path: str) -> None:
             logger.exception("_backup_loop: failed")
 
 
+async def _notify_new_order(bot: Bot, order: dict, account_id: int) -> None:
+    point_id = await database.resolve_order_point_id(order)
+    if point_id is None:
+        # Same policy as chat notifications: no resolvable point -> stay
+        # silent rather than guess-broadcast. Still visible on demand via
+        # "📦 Заказы Avito".
+        return
+
+    recipients = await database.list_point_subscribers(point_id, on_shift_only=True)
+    if not recipients:
+        return
+
+    status_label = constants.ORDER_STATUS_LABELS.get(order.get("status", ""), order.get("status", ""))
+    items = order.get("items") or []
+    titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
+    total = (order.get("prices") or {}).get("total")
+    text = f"📦 Новый заказ Avito Доставки\n{status_label}\n{titles}"
+    if total is not None:
+        text += f"\n💰 {total} ₽"
+
+    kb = keyboards.order_list_kb([order], account_id)
+    for user in recipients:
+        try:
+            await bot.send_message(user.telegram_id, text, reply_markup=kb)
+        except TelegramForbiddenError:
+            await database.mark_user_unreachable(user.telegram_id)
+        except Exception:
+            logger.exception("_notify_new_order: failed to notify %s", user.telegram_id)
+
+
+async def _orders_poll_loop(bot: Bot) -> None:
+    while True:
+        await asyncio.sleep(constants.ORDER_POLL_INTERVAL_SECONDS)
+        try:
+            accounts = await database.list_avito_accounts(active_only=True)
+            for account in accounts:
+                client = avito_client.get_pool().get(account.id)
+                if client is None:
+                    continue
+                try:
+                    orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
+                except avito_client.AvitoAPIError:
+                    continue
+                seen_ids = await database.get_seen_order_ids(account.id)
+                for order in orders:
+                    order_id = order.get("id")
+                    if order_id is None or str(order_id) in seen_ids:
+                        continue
+                    await database.mark_order_seen(str(order_id), account.id)
+                    await _notify_new_order(bot, order, account.id)
+        except Exception:
+            logger.exception("_orders_poll_loop: failed")
+
+
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     accounts = await database.list_avito_accounts(active_only=True)
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
     tasks.append(asyncio.create_task(_reload_accounts_loop()))
     tasks.append(asyncio.create_task(_prune_messages_loop()))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
+    tasks.append(asyncio.create_task(_orders_poll_loop(bot)))
     return tasks
 
 

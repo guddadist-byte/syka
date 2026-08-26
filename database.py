@@ -898,6 +898,43 @@ async def get_known_message_ids(chat_id: str) -> set[str]:
     return {r["avito_message_id"] for r in rows}
 
 
+async def get_point_id_for_chat(chat_id: str) -> int | None:
+    """Reuses the point already resolved for this chat (see
+    resolve_point_for_item) to route an Avito Delivery order to the same
+    point — orders carry an item's chatId, and that chat (if the buyer
+    ever messaged) is already routed correctly."""
+    row = await _fetchone("SELECT point_id FROM chats WHERE chat_id = ?", (chat_id,))
+    return row["point_id"] if row else None
+
+
+async def resolve_order_point_id(order: dict) -> int | None:
+    """Shared by tasks.py (push notifications) and handlers.py (the
+    on-demand "📦 Заказы Avito" screen) — lives here rather than in
+    either of those two so neither has to import the other."""
+    for item in order.get("items") or []:
+        chat_id = item.get("chatId")
+        if not chat_id:
+            continue
+        point_id = await get_point_id_for_chat(chat_id)
+        if point_id is not None:
+            return point_id
+    return None
+
+
+async def get_seen_order_ids(avito_account_id: int) -> set[str]:
+    rows = await _fetchall(
+        "SELECT order_id FROM seen_avito_orders WHERE avito_account_id = ?", (avito_account_id,)
+    )
+    return {r["order_id"] for r in rows}
+
+
+async def mark_order_seen(order_id: str, avito_account_id: int) -> None:
+    await _execute(
+        "INSERT OR IGNORE INTO seen_avito_orders (order_id, avito_account_id) VALUES (?, ?)",
+        (order_id, avito_account_id),
+    )
+
+
 async def get_recent_messages(chat_id: str, limit: int = 20) -> list[models.Message]:
     rows = await _fetchall(
         "SELECT * FROM messages WHERE chat_id = ? ORDER BY sent_at DESC LIMIT ?",

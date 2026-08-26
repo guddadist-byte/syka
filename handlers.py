@@ -1916,8 +1916,9 @@ async def _show_reviews(message: Message, account_id: int) -> None:
     try:
         info = await client.get_rating_info()
         data = await client.get_reviews(limit=10)
-    except avito_client.AvitoAPIError:
-        await message.answer("⚠️ Не удалось получить отзывы от Avito.")
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("_show_reviews: failed for account %s", account_id)
+        await message.answer(f"⚠️ Не удалось получить отзывы от Avito: {exc}")
         return
 
     rating = info.get("rating") or {}
@@ -1972,16 +1973,14 @@ async def receive_review_answer(message: Message, state: FSMContext) -> None:
         return
     try:
         await client.answer_review(review_id, message.text)
-    except avito_client.AvitoAPIError:
-        await message.answer("⚠️ Avito отклонил ответ на отзыв.")
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("receive_review_answer: failed for review %s", review_id)
+        await message.answer(f"⚠️ Avito отклонил ответ на отзыв: {exc}")
         return
     await message.answer("✅ Ответ отправлен.")
 
 
 # --- orders (📦 Заказы Avito, ПВЗ/Самовывоз) ---------------------------------
-
-_ORDER_ACTIVE_STATUSES = ["on_confirmation", "ready_to_ship", "in_transit", "on_return", "in_dispute"]
-
 
 @admin_router.callback_query(F.data == "adm_orders")
 async def cb_admin_orders(callback: CallbackQuery) -> None:
@@ -1991,7 +1990,7 @@ async def cb_admin_orders(callback: CallbackQuery) -> None:
         await callback.message.answer("Нет подключённых Avito-аккаунтов.")
         return
     if len(accounts) == 1:
-        await _show_orders(callback.message, accounts[0].id)
+        await _show_orders(callback.message, accounts[0].id, callback.from_user.id)
         return
     await callback.message.answer(
         "📦 Выберите аккаунт Avito:", reply_markup=keyboards.avito_account_picker_kb(accounts, "adm_ordersacc")
@@ -2002,19 +2001,33 @@ async def cb_admin_orders(callback: CallbackQuery) -> None:
 async def cb_admin_orders_account(callback: CallbackQuery) -> None:
     await callback.answer()
     account_id = int(callback.data.rsplit("_", 1)[1])
-    await _show_orders(callback.message, account_id)
+    await _show_orders(callback.message, account_id, callback.from_user.id)
 
 
-async def _show_orders(message: Message, account_id: int) -> None:
+async def _show_orders(message: Message, account_id: int, actor_id: int) -> None:
     client = avito_client.get_pool().get(account_id)
     if client is None:
         await message.answer("⚠️ Аккаунт Avito недоступен.")
         return
     try:
-        orders = await client.get_orders(statuses=_ORDER_ACTIVE_STATUSES)
-    except avito_client.AvitoAPIError:
-        await message.answer("⚠️ Не удалось получить заказы от Avito.")
+        orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("_show_orders: failed for account %s", account_id)
+        await message.answer(f"⚠️ Не удалось получить заказы от Avito: {exc}")
         return
+
+    # Same rule as "📩 Непрочитанные"/"🕒 Недавние" — strictly by "Мои
+    # точки" subscription, for every role including Director; an order
+    # whose point we can't resolve at all (see database.resolve_order_point_id)
+    # is excluded here too, same as it staying silent for push notifications.
+    actor = await database.get_user(actor_id)
+    point_ids = await _point_ids_for_user(actor) if actor else set()
+    filtered = []
+    for order in orders:
+        point_id = await database.resolve_order_point_id(order)
+        if point_id in point_ids:
+            filtered.append(order)
+    orders = filtered
 
     if not orders:
         await message.answer("📦 Активных заказов нет.")
@@ -2045,11 +2058,12 @@ async def cb_order_action(callback: CallbackQuery) -> None:
         return
     try:
         await client.apply_order_transition(order_id, action)
-    except avito_client.AvitoAPIError:
-        await callback.message.answer("⚠️ Avito отклонил это действие.")
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("cb_order_action: %s failed for order %s", action, order_id)
+        await callback.message.answer(f"⚠️ Avito отклонил это действие: {exc}")
         return
     await callback.message.answer("✅ Готово.")
-    await _show_orders(callback.message, int(account_id_str))
+    await _show_orders(callback.message, int(account_id_str), callback.from_user.id)
 
 
 @admin_router.callback_query(F.data.startswith("ordmark_"))
@@ -2082,8 +2096,9 @@ async def receive_order_markings(message: Message, state: FSMContext) -> None:
         if item_id is None:
             raise avito_client.AvitoAPIError("no item found for order")
         await client.set_order_markings(item_id, order_id, markings)
-    except avito_client.AvitoAPIError:
-        await message.answer("⚠️ Avito отклонил маркировку.")
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("receive_order_markings: failed for order %s", order_id)
+        await message.answer(f"⚠️ Avito отклонил маркировку: {exc}")
         return
     await message.answer("✅ Маркировка передана.")
 
@@ -2143,7 +2158,8 @@ async def receive_cnc_comment(message: Message, state: FSMContext) -> None:
             order_id, marketplace_id, data["cnc_period"],
             address=data.get("cnc_address"), details=None if comment == "-" else comment,
         )
-    except avito_client.AvitoAPIError:
-        await message.answer("⚠️ Avito отклонил подготовку заказа.")
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("receive_cnc_comment: failed for order %s", order_id)
+        await message.answer(f"⚠️ Avito отклонил подготовку заказа: {exc}")
         return
     await message.answer("✅ Заказ подготовлен.")

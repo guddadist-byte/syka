@@ -42,6 +42,10 @@ ORDER_STATUS_LABELS: dict[str, str] = {
     "closed": "🔒 Закрыт",
 }
 
+# Statuses worth showing/polling — excludes final states (canceled/
+# delivered/closed) where there's nothing left to do.
+ORDER_ACTIVE_STATUSES = ["on_confirmation", "ready_to_ship", "in_transit", "on_return", "in_dispute"]
+
 # --- User status ---------------------------------------------------------
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
@@ -124,6 +128,7 @@ ACCOUNT_RELOAD_INTERVAL_SECONDS = 300
 MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
 MESSAGE_RETENTION_DAYS = 30
 BACKUP_LOOP_INTERVAL_SECONDS = 3600
+ORDER_POLL_INTERVAL_SECONDS = 120
 
 ERROR_BACKOFF_BASE_SECONDS = 30
 ERROR_BACKOFF_MAX_SECONDS = 600
