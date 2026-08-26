@@ -344,6 +344,49 @@ class AvitoClient:
             "DELETE", f"/messenger/v1/accounts/{self.avito_user_id}/chats/{chat_id}/messages/{message_id}"
         )
 
+    # --- ratings & reviews (no {user_id} in the path — ClientCredentials
+    # already scopes these to the authenticated account) --------------------
+
+    async def get_rating_info(self) -> dict:
+        return await self._request("GET", "/ratings/v1/info")
+
+    async def get_reviews(self, offset: int = 0, limit: int = 10) -> dict:
+        return await self._request("GET", "/ratings/v1/reviews", params={"offset": offset, "limit": limit})
+
+    async def answer_review(self, review_id: int, message: str) -> dict:
+        return await self._request("POST", "/ratings/v1/answers", json={"reviewId": review_id, "message": message})
+
+    # --- Avito Delivery order management (pvz / cnc only, per the account's
+    # actual usage — see order status/action labels in constants.py) -------
+
+    async def get_orders(self, statuses: list[str] | None = None, limit: int = 20) -> list[dict]:
+        params: dict = {"limit": limit}
+        if statuses:
+            params["statuses"] = ",".join(statuses)
+        data = await self._request("GET", "/order-management/1/orders", params=params)
+        return data.get("orders", [])
+
+    async def apply_order_transition(self, order_id: str, transition: str) -> dict:
+        return await self._request(
+            "POST", "/order-management/1/order/applyTransition",
+            json={"orderId": order_id, "transition": transition},
+        )
+
+    async def set_order_markings(self, item_id: str, order_id: str, markings: list[str]) -> dict:
+        return await self._request(
+            "POST", "/order-management/1/markings",
+            json={"markings": [{"itemId": item_id, "orderId": order_id, "markings": markings}]},
+        )
+
+    async def set_cnc_order_details(self, order_id: str, marketplace_id: str, booking_period: int,
+                                     address: str | None = None, details: str | None = None) -> dict:
+        body: dict = {"id": order_id, "marketplaceId": marketplace_id, "bookingPeriod": booking_period}
+        if address:
+            body["address"] = address
+        if details:
+            body["details"] = details
+        return await self._request("POST", "/order-management/1/order/cncSetDetails", json=body)
+
 
 class AvitoClientPool:
     def __init__(self, session: aiohttp.ClientSession) -> None:

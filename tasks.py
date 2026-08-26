@@ -148,6 +148,12 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
 
     known_ids = await database.get_known_message_ids(chat.chat_id)
 
+    # Collected instead of notifying inside the loop: after a restart (or
+    # any gap in polling), several client messages can show up as "new" in
+    # a single pass, and notifying once per message instead of once per
+    # chat is exactly the "every message pings separately" bug reported.
+    new_in_messages: list[bot_cache.CachedMessage] = []
+
     for message in messages:
         if message.message_id is not None and message.message_id in known_ids:
             # Already persisted before a restart — bot_cache is in-memory
@@ -181,7 +187,10 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             chat.chat_id, avito_account_id=account.id, point_id=point_id,
             last_message_at=sent_at_str, last_message_text=message.text, last_message_dir="in",
         )
-        await _notify_subscribers(chat.chat_id, point_id, cached, cached_message, bot)
+        new_in_messages.append(cached_message)
+
+    if new_in_messages:
+        await _notify_subscribers(chat.chat_id, point_id, cached, new_in_messages, bot)
 
     # unread_count may have changed during the loop above — a new inbound
     # message, or an "out" reply sent directly in Avito's own app rather
@@ -201,21 +210,26 @@ async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: st
 
 
 async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: bot_cache.CachedChat,
-                               message: bot_cache.CachedMessage, bot: Bot) -> None:
+                               messages: list[bot_cache.CachedMessage], bot: Bot) -> None:
     short_id = await bot_cache.get_short_id(chat_id)
     client_name = html.escape(cached_chat.client_name or "клиент")
-    preview = html.escape(message.text[:200]) if message.text else "(фото)"
+    last_message = messages[-1]
+    preview = html.escape(last_message.text[:200]) if last_message.text else "(фото)"
     if cached_chat.item_title and cached_chat.item_url:
         item_line = f'📦 <a href="{html.escape(cached_chat.item_url)}">{html.escape(cached_chat.item_title)}</a>'
     elif cached_chat.item_title:
         item_line = f"📦 {html.escape(cached_chat.item_title)}"
     else:
         item_line = "📦 Сообщение в профиль (без объявления)"
-    # Exactly one message, from the client, and it's this one -> nobody has
-    # replied yet, this is a brand-new lead, not just another message in an
-    # existing conversation.
-    is_new_lead = len(cached_chat.messages) == 1 and cached_chat.messages[0].direction == "in"
-    header = f"🆕 Новый клиент! {client_name}" if is_new_lead else f"📩 Новое сообщение от {client_name}"
+    # Nobody has ever replied in this chat -> every message in it so far is
+    # a brand-new lead, not just another message in an existing
+    # conversation, even if the client sent several before anyone answered.
+    is_new_lead = bool(cached_chat.messages) and all(m.direction == "in" for m in cached_chat.messages)
+    if len(messages) > 1:
+        header = (f"🆕 Новый клиент! {client_name} ({len(messages)} сообщения)" if is_new_lead
+                  else f"📩 {len(messages)} новых сообщений от {client_name}")
+    else:
+        header = f"🆕 Новый клиент! {client_name}" if is_new_lead else f"📩 Новое сообщение от {client_name}"
     text = f"{header}\n{item_line}\n\n{preview}"
 
     if point_id is None:

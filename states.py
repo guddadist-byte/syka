@@ -72,3 +72,12 @@ class AdminStates(StatesGroup):
     waiting_for_user_trade_point = State()
     waiting_for_unblock_telegram_id = State()
     waiting_for_delete_telegram_id = State()
+
+    # Reviews (Отзывы Avito)
+    waiting_for_review_answer = State()
+
+    # Orders (Заказы Avito Доставки)
+    waiting_for_order_markings = State()
+    waiting_for_cnc_address = State()
+    waiting_for_cnc_period = State()
+    waiting_for_cnc_comment = State()

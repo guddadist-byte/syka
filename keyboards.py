@@ -48,10 +48,10 @@ def cancel_reply_kb() -> ReplyKeyboardMarkup:
 def chat_list_kb(chats: list[CachedChat]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for chat in chats:
-        # A chat with exactly one message, from the client, is a brand-new
-        # lead — nobody has replied yet, distinct from an existing chat
-        # that just got another message.
-        is_new_lead = len(chat.messages) == 1 and chat.messages[0].direction == "in"
+        # Nobody has ever replied in this chat -> a brand-new lead, distinct
+        # from an existing chat that just got another message, even if the
+        # client sent several messages before anyone answered.
+        is_new_lead = bool(chat.messages) and all(m.direction == "in" for m in chat.messages)
         if is_new_lead:
             label = f"🆕 Новый клиент · {chat.client_name or 'Клиент'}"
         else:
@@ -180,6 +180,8 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
+    builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
+    builder.row(InlineKeyboardButton(text="📦 Заказы Avito", callback_data="adm_orders"))
     return builder.as_markup()
 
 
@@ -191,6 +193,8 @@ def leadership_menu_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="👤 Управление аккаунтом по ID", callback_data="adm_accountmenu"))
     builder.row(InlineKeyboardButton(text="📢 Сообщение всем", callback_data="adm_broadcast"))
     builder.row(InlineKeyboardButton(text="📭 Чаты без точки", callback_data="adm_unassigned"))
+    builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
+    builder.row(InlineKeyboardButton(text="📦 Заказы Avito", callback_data="adm_orders"))
     return builder.as_markup()
 
 
@@ -317,6 +321,57 @@ def backup_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="⏱ Периодичность", callback_data="adm_backupinterval"))
     builder.row(InlineKeyboardButton(text="📤 Сделать бэкап сейчас", callback_data="adm_backupnow"))
+    return builder.as_markup()
+
+
+def avito_account_picker_kb(accounts: list, prefix: str) -> InlineKeyboardMarkup:
+    """Generic "pick which Avito account" list — used by both Reviews and
+    Orders, which each then jump straight to their own screen for it."""
+    builder = InlineKeyboardBuilder()
+    for acc in accounts:
+        builder.row(InlineKeyboardButton(text=acc.name, callback_data=f"{prefix}_{acc.id}"))
+    return builder.as_markup()
+
+
+def review_reply_kb(unanswered: list[tuple[int, str]], account_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for review_id, sender_name in unanswered:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"✍️ Ответить: {sender_name}", callback_data=f"revans_{review_id}:{account_id}"
+            )
+        )
+    return builder.as_markup()
+
+
+def order_list_kb(orders: list[dict], account_id: int) -> InlineKeyboardMarkup:
+    """One button per order per entry in its `availableActions` — built from
+    what Avito actually says is possible for that order, not hardcoded per
+    delivery type (the pvz/dbs/rdbs/courier/cnc/postamat action table in
+    Avito's docs couldn't be reliably extracted column-by-column)."""
+    builder = InlineKeyboardBuilder()
+    action_labels = {
+        "confirm": "✅ Подтвердить",
+        "reject": "❌ Отменить",
+        "setMarkings": "🏷 Маркировка",
+        "setCNCDetails": "📍 Подготовить самовывоз",
+    }
+    for order in orders:
+        order_id = order.get("id")
+        row = []
+        for action in order.get("availableActions") or []:
+            name = action.get("name")
+            if name not in action_labels:
+                continue
+            if name in ("confirm", "reject"):
+                callback_data = f"ordact_{name}:{order_id}:{account_id}"
+            elif name == "setMarkings":
+                callback_data = f"ordmark_{order_id}:{account_id}"
+            else:
+                callback_data = f"ordcnc_{order_id}:{account_id}"
+            row.append(InlineKeyboardButton(text=action_labels[name], callback_data=callback_data))
+        if row:
+            builder.row(*row)
     return builder.as_markup()
 
 

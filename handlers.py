@@ -1881,3 +1881,269 @@ async def cb_admin_backup_now(callback: CallbackQuery) -> None:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
     await callback.message.answer("✅ Бэкап отправлен.")
+
+
+# --- reviews (⭐ Отзывы Avito) ------------------------------------------------
+
+
+@admin_router.callback_query(F.data == "adm_reviews")
+async def cb_admin_reviews(callback: CallbackQuery) -> None:
+    await callback.answer()
+    accounts = await database.list_avito_accounts(active_only=True)
+    if not accounts:
+        await callback.message.answer("Нет подключённых Avito-аккаунтов.")
+        return
+    if len(accounts) == 1:
+        await _show_reviews(callback.message, accounts[0].id)
+        return
+    await callback.message.answer(
+        "⭐ Выберите аккаунт Avito:", reply_markup=keyboards.avito_account_picker_kb(accounts, "adm_reviewsacc")
+    )
+
+
+@admin_router.callback_query(F.data.startswith("adm_reviewsacc_"))
+async def cb_admin_reviews_account(callback: CallbackQuery) -> None:
+    await callback.answer()
+    account_id = int(callback.data.rsplit("_", 1)[1])
+    await _show_reviews(callback.message, account_id)
+
+
+async def _show_reviews(message: Message, account_id: int) -> None:
+    client = avito_client.get_pool().get(account_id)
+    if client is None:
+        await message.answer("⚠️ Аккаунт Avito недоступен.")
+        return
+    try:
+        info = await client.get_rating_info()
+        data = await client.get_reviews(limit=10)
+    except avito_client.AvitoAPIError:
+        await message.answer("⚠️ Не удалось получить отзывы от Avito.")
+        return
+
+    rating = info.get("rating") or {}
+    score = rating.get("score")
+    count = rating.get("reviewsCount", 0)
+    lines = [f"⭐ Рейтинг: {score if score is not None else '—'} ({count} отзывов)", ""]
+
+    reviews = data.get("reviews") or []
+    unanswered: list[tuple[int, str]] = []
+    if not reviews:
+        lines.append("Отзывов пока нет.")
+    for review in reviews:
+        sender_name = (review.get("sender") or {}).get("name", "Клиент")
+        item_title = (review.get("item") or {}).get("title")
+        text = review.get("text") or "(без текста)"
+        review_score = review.get("score") or 0
+        answer = review.get("answer")
+        lines.append(f"👤 {html.escape(sender_name)} · {'⭐' * review_score}")
+        if item_title:
+            lines.append(f"📦 {html.escape(item_title)}")
+        lines.append(html.escape(text))
+        if answer:
+            lines.append(f"↳ Ваш ответ: {html.escape(answer.get('text', ''))}")
+        elif review.get("canAnswer"):
+            unanswered.append((review["id"], sender_name))
+        lines.append("")
+
+    await message.answer(
+        "\n".join(lines).strip(), reply_markup=keyboards.review_reply_kb(unanswered, account_id)
+    )
+
+
+@admin_router.callback_query(F.data.startswith("revans_"))
+async def cb_review_answer_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    review_id_str, account_id_str = payload.split(":")
+    await state.set_state(AdminStates.waiting_for_review_answer)
+    await state.update_data(review_id=int(review_id_str), review_account_id=int(account_id_str))
+    await callback.message.answer("✍️ Введите текст ответа на отзыв:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_review_answer, SafeFreeText())
+async def receive_review_answer(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    review_id = data.get("review_id")
+    account_id = data.get("review_account_id")
+    await state.clear()
+    client = avito_client.get_pool().get(account_id) if account_id is not None else None
+    if client is None or review_id is None:
+        await message.answer("⚠️ Не удалось отправить ответ.")
+        return
+    try:
+        await client.answer_review(review_id, message.text)
+    except avito_client.AvitoAPIError:
+        await message.answer("⚠️ Avito отклонил ответ на отзыв.")
+        return
+    await message.answer("✅ Ответ отправлен.")
+
+
+# --- orders (📦 Заказы Avito, ПВЗ/Самовывоз) ---------------------------------
+
+_ORDER_ACTIVE_STATUSES = ["on_confirmation", "ready_to_ship", "in_transit", "on_return", "in_dispute"]
+
+
+@admin_router.callback_query(F.data == "adm_orders")
+async def cb_admin_orders(callback: CallbackQuery) -> None:
+    await callback.answer()
+    accounts = await database.list_avito_accounts(active_only=True)
+    if not accounts:
+        await callback.message.answer("Нет подключённых Avito-аккаунтов.")
+        return
+    if len(accounts) == 1:
+        await _show_orders(callback.message, accounts[0].id)
+        return
+    await callback.message.answer(
+        "📦 Выберите аккаунт Avito:", reply_markup=keyboards.avito_account_picker_kb(accounts, "adm_ordersacc")
+    )
+
+
+@admin_router.callback_query(F.data.startswith("adm_ordersacc_"))
+async def cb_admin_orders_account(callback: CallbackQuery) -> None:
+    await callback.answer()
+    account_id = int(callback.data.rsplit("_", 1)[1])
+    await _show_orders(callback.message, account_id)
+
+
+async def _show_orders(message: Message, account_id: int) -> None:
+    client = avito_client.get_pool().get(account_id)
+    if client is None:
+        await message.answer("⚠️ Аккаунт Avito недоступен.")
+        return
+    try:
+        orders = await client.get_orders(statuses=_ORDER_ACTIVE_STATUSES)
+    except avito_client.AvitoAPIError:
+        await message.answer("⚠️ Не удалось получить заказы от Avito.")
+        return
+
+    if not orders:
+        await message.answer("📦 Активных заказов нет.")
+        return
+
+    lines = []
+    for order in orders:
+        status = order.get("status", "")
+        status_label = constants.ORDER_STATUS_LABELS.get(status, status)
+        items = order.get("items") or []
+        titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
+        delivery = (order.get("delivery") or {}).get("serviceType", "")
+        total = (order.get("prices") or {}).get("total")
+        lines.append(f"{status_label} · {delivery}\n📦 {titles}" + (f"\n💰 {total} ₽" if total is not None else ""))
+        lines.append("")
+
+    await message.answer("\n".join(lines).strip(), reply_markup=keyboards.order_list_kb(orders, account_id))
+
+
+@admin_router.callback_query(F.data.startswith("ordact_"))
+async def cb_order_action(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    action, order_id, account_id_str = payload.split(":")
+    client = avito_client.get_pool().get(int(account_id_str))
+    if client is None:
+        await callback.message.answer("⚠️ Аккаунт Avito недоступен.")
+        return
+    try:
+        await client.apply_order_transition(order_id, action)
+    except avito_client.AvitoAPIError:
+        await callback.message.answer("⚠️ Avito отклонил это действие.")
+        return
+    await callback.message.answer("✅ Готово.")
+    await _show_orders(callback.message, int(account_id_str))
+
+
+@admin_router.callback_query(F.data.startswith("ordmark_"))
+async def cb_order_markings_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    await state.set_state(AdminStates.waiting_for_order_markings)
+    await state.update_data(order_id=order_id, order_account_id=int(account_id_str))
+    await callback.message.answer(
+        "🏷 Введите коды маркировки «Честный знак» через запятую:", reply_markup=keyboards.cancel_kb()
+    )
+
+
+@admin_router.message(AdminStates.waiting_for_order_markings, SafeFreeText())
+async def receive_order_markings(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    order_id = data.get("order_id")
+    account_id = data.get("order_account_id")
+    await state.clear()
+    client = avito_client.get_pool().get(account_id) if account_id is not None else None
+    if client is None or order_id is None:
+        await message.answer("⚠️ Не удалось передать маркировку.")
+        return
+    markings = [code.strip() for code in message.text.split(",") if code.strip()]
+    try:
+        orders = await client.get_orders()
+        order = next((o for o in orders if o.get("id") == order_id), None)
+        item_id = (order.get("items") or [{}])[0].get("avitoId") if order else None
+        if item_id is None:
+            raise avito_client.AvitoAPIError("no item found for order")
+        await client.set_order_markings(item_id, order_id, markings)
+    except avito_client.AvitoAPIError:
+        await message.answer("⚠️ Avito отклонил маркировку.")
+        return
+    await message.answer("✅ Маркировка передана.")
+
+
+@admin_router.callback_query(F.data.startswith("ordcnc_"))
+async def cb_order_cnc_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    client = avito_client.get_pool().get(int(account_id_str))
+    marketplace_id = None
+    if client is not None:
+        try:
+            orders = await client.get_orders()
+            order = next((o for o in orders if o.get("id") == order_id), None)
+            marketplace_id = order.get("marketplaceId") if order else None
+        except avito_client.AvitoAPIError:
+            pass
+    await state.set_state(AdminStates.waiting_for_cnc_address)
+    await state.update_data(order_id=order_id, order_account_id=int(account_id_str), marketplace_id=marketplace_id)
+    await callback.message.answer("📍 Введите адрес получения товара:", reply_markup=keyboards.cancel_kb())
+
+
+@admin_router.message(AdminStates.waiting_for_cnc_address, SafeFreeText())
+async def receive_cnc_address(message: Message, state: FSMContext) -> None:
+    await state.update_data(cnc_address=message.text.strip())
+    await state.set_state(AdminStates.waiting_for_cnc_period)
+    await message.answer("Введите срок бронирования товара в днях:")
+
+
+@admin_router.message(AdminStates.waiting_for_cnc_period, SafeFreeText())
+async def receive_cnc_period(message: Message, state: FSMContext) -> None:
+    try:
+        period = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите целое число дней.")
+        return
+    await state.update_data(cnc_period=period)
+    await state.set_state(AdminStates.waiting_for_cnc_comment)
+    await message.answer("Комментарий для покупателя (или «-», чтобы пропустить):")
+
+
+@admin_router.message(AdminStates.waiting_for_cnc_comment, SafeFreeText())
+async def receive_cnc_comment(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    order_id = data.get("order_id")
+    account_id = data.get("order_account_id")
+    marketplace_id = data.get("marketplace_id")
+    client = avito_client.get_pool().get(account_id) if account_id is not None else None
+    if client is None or order_id is None or marketplace_id is None:
+        await message.answer("⚠️ Не удалось подготовить заказ (не найден marketplaceId).")
+        return
+    comment = message.text.strip()
+    try:
+        await client.set_cnc_order_details(
+            order_id, marketplace_id, data["cnc_period"],
+            address=data.get("cnc_address"), details=None if comment == "-" else comment,
+        )
+    except avito_client.AvitoAPIError:
+        await message.answer("⚠️ Avito отклонил подготовку заказа.")
+        return
+    await message.answer("✅ Заказ подготовлен.")

@@ -30,6 +30,18 @@ ROLE_LABELS: dict[str, str] = {
     DIRECTOR: "👑 Админ",
 }
 
+# --- Avito Delivery order statuses ----------------------------------------
+ORDER_STATUS_LABELS: dict[str, str] = {
+    "on_confirmation": "⏳ Ожидает подтверждения",
+    "ready_to_ship": "📦 Готов к отправке",
+    "in_transit": "🚚 В пути",
+    "canceled": "❌ Отменён",
+    "delivered": "✅ Доставлен",
+    "on_return": "↩️ На возврате",
+    "in_dispute": "⚠️ Открыт спор",
+    "closed": "🔒 Закрыт",
+}
+
 # --- User status ---------------------------------------------------------
 STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
