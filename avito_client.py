@@ -360,9 +360,13 @@ class AvitoClient:
     # actual usage — see order status/action labels in constants.py) -------
 
     async def get_orders(self, statuses: list[str] | None = None, limit: int = 20) -> list[dict]:
-        params: dict = {"limit": limit}
+        # Avito rejects a single comma-joined "statuses" value (confirmed
+        # live: 400 "... does not exist in enum") — it wants the query
+        # param repeated once per status, which aiohttp only produces from
+        # a list of (key, value) pairs, not a dict.
+        params: list[tuple[str, str | int]] = [("limit", limit)]
         if statuses:
-            params["statuses"] = ",".join(statuses)
+            params.extend(("statuses", status) for status in statuses)
         data = await self._request("GET", "/order-management/1/orders", params=params)
         return data.get("orders", [])
 
