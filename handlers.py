@@ -2023,26 +2023,93 @@ async def _show_all_orders(message: Message, actor_id: int) -> None:
         await message.answer(text)
         return
 
-    lines = []
-    for order, _account_id, account_name in shown:
-        status = order.get("status", "")
-        status_label = constants.ORDER_STATUS_LABELS.get(status, status)
-        items = order.get("items") or []
-        titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
-        delivery_info = order.get("delivery") or {}
-        service = delivery_info.get("serviceName") or delivery_info.get("serviceType", "")
-        total = (order.get("prices") or {}).get("total")
-        lines.append(
-            f"🏢 {html.escape(account_name)} · {status_label}\n📦 {titles}"
-            + (f"\n🚚 {html.escape(service)}" if service else "")
-            + (f"\n💰 {total} ₽" if total is not None else "")
-        )
-        lines.append("")
+    text = "📦 Ваши заказы:"
     if errors:
-        lines.append("⚠️ Не удалось получить заказы от:\n" + "\n".join(errors))
+        text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
+    kb = keyboards.orders_menu_kb([(order, account_id) for order, account_id, _name in shown])
+    await message.answer(text, reply_markup=kb)
 
-    kb = keyboards.order_list_kb([(order, account_id) for order, account_id, _name in shown])
-    await message.answer("\n".join(lines).strip(), reply_markup=kb)
+
+async def _show_order_detail(message: Message, order_id: str, account_id: int) -> None:
+    client = avito_client.get_pool().get(account_id)
+    if client is None:
+        await message.answer("⚠️ Аккаунт Avito недоступен.")
+        return
+    try:
+        orders = await client.get_orders()
+    except avito_client.AvitoAPIError as exc:
+        logger.exception("_show_order_detail: failed for account %s", account_id)
+        await message.answer(f"⚠️ Не удалось получить заказ от Avito: {exc}")
+        return
+    order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
+    if order is None:
+        await message.answer("⚠️ Заказ не найден (возможно, статус уже изменился).")
+        return
+
+    account = await database.get_avito_account(account_id)
+    point_id = await database.resolve_order_point_id(order)
+    point = await database.get_point(point_id) if point_id else None
+
+    lines = []
+    if point is not None:
+        point_line = f"🏢 {html.escape(point.name)}"
+        if point.address:
+            point_line += f", {html.escape(point.address)}"
+        lines.append(point_line)
+    if account is not None:
+        lines.append(f"📇 Кабинет: {html.escape(account.name)}")
+
+    lines.append(f"🧾 Номер заказа: {order.get('marketplaceId') or order.get('id')}")
+
+    delivery_info = order.get("delivery") or {}
+    track_number = delivery_info.get("dispatchNumber") or delivery_info.get("trackingNumber")
+    if track_number:
+        lines.append(f"📮 Трек-номер: {html.escape(str(track_number))}")
+
+    items = order.get("items") or []
+    titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
+    lines.append(f"📦 Товар: {titles}")
+
+    status = order.get("status", "")
+    lines.append(f"Статус: {constants.ORDER_STATUS_LABELS.get(status, status)}")
+
+    prices = order.get("prices") or {}
+    if prices.get("total") is not None:
+        lines.append(f"💰 Сумма: {prices['total']} ₽")
+    if prices.get("commission") is not None:
+        lines.append(f"Комиссия: {prices['commission']} ₽")
+
+    service = delivery_info.get("serviceName") or delivery_info.get("serviceType", "")
+    if service:
+        lines.append(f"🚚 Служба доставки: {html.escape(str(service))}")
+
+    detail_text = "\n".join(lines)
+    kb = keyboards.order_detail_kb(order, account_id)
+
+    barcode_png = None
+    if track_number:
+        try:
+            barcode_png = utils.generate_barcode_png(str(track_number))
+        except Exception:
+            logger.exception("_show_order_detail: barcode generation failed for %s", track_number)
+
+    if barcode_png is None:
+        await message.answer(detail_text, reply_markup=kb)
+    elif len(detail_text) <= 1024:
+        await message.answer_photo(
+            BufferedInputFile(barcode_png, filename=f"{track_number}.png"), caption=detail_text, reply_markup=kb
+        )
+    else:
+        await message.answer_photo(BufferedInputFile(barcode_png, filename=f"{track_number}.png"))
+        await message.answer(detail_text, reply_markup=kb)
+
+
+@crm_router.callback_query(F.data.startswith("ordview_"))
+async def cb_order_view(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    await _show_order_detail(callback.message, order_id, int(account_id_str))
 
 
 @crm_router.callback_query(F.data.startswith("ordact_"))
@@ -2061,7 +2128,7 @@ async def cb_order_action(callback: CallbackQuery) -> None:
         await callback.message.answer(f"⚠️ Avito отклонил это действие: {exc}")
         return
     await callback.message.answer("✅ Готово.")
-    await _show_all_orders(callback.message, callback.from_user.id)
+    await _show_order_detail(callback.message, order_id, int(account_id_str))
 
 
 @crm_router.callback_query(F.data.startswith("ordmark_"))
@@ -2099,6 +2166,7 @@ async def receive_order_markings(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Avito отклонил маркировку: {exc}")
         return
     await message.answer("✅ Маркировка передана.")
+    await _show_order_detail(message, order_id, account_id)
 
 
 @crm_router.callback_query(F.data.startswith("ordcnc_"))
@@ -2161,6 +2229,7 @@ async def receive_cnc_comment(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Avito отклонил подготовку заказа: {exc}")
         return
     await message.answer("✅ Заказ подготовлен.")
+    await _show_order_detail(message, order_id, account_id)
 
 
 @crm_router.callback_query(F.data.startswith("ordcode_"))
@@ -2181,7 +2250,7 @@ async def cb_order_confirm_code_start(callback: CallbackQuery, state: FSMContext
         await callback.message.answer("⚠️ Не удалось определить номер посылки для этого заказа.")
         return
     await state.set_state(AdminStates.waiting_for_order_confirm_code)
-    await state.update_data(order_confirm_parcel_id=parcel_id, order_account_id=int(account_id_str))
+    await state.update_data(order_id=order_id, order_confirm_parcel_id=parcel_id, order_account_id=int(account_id_str))
     await callback.message.answer(
         "✅ Введите код, который назвал покупатель при получении:", reply_markup=keyboards.cancel_kb()
     )
@@ -2190,6 +2259,7 @@ async def cb_order_confirm_code_start(callback: CallbackQuery, state: FSMContext
 @crm_router.message(AdminStates.waiting_for_order_confirm_code, SafeFreeText())
 async def receive_order_confirm_code(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
+    order_id = data.get("order_id")
     parcel_id = data.get("order_confirm_parcel_id")
     account_id = data.get("order_account_id")
     await state.clear()
@@ -2204,32 +2274,5 @@ async def receive_order_confirm_code(message: Message, state: FSMContext) -> Non
         await message.answer(f"⚠️ Код не подошёл: {exc}")
         return
     await message.answer("✅ Код подтверждён, заказ можно выдавать.")
-
-
-@crm_router.callback_query(F.data.startswith("ordlabel_"))
-async def cb_order_label(callback: CallbackQuery) -> None:
-    await callback.answer("Генерирую этикетку…")
-    _, payload = callback.data.split("_", 1)
-    order_id, account_id_str = payload.split(":")
-    client = avito_client.get_pool().get(int(account_id_str))
-    if client is None:
-        await callback.message.answer("⚠️ Аккаунт Avito недоступен.")
-        return
-    try:
-        task_id = await client.create_shipping_labels_task([order_id])
-        pdf_bytes = None
-        for _attempt in range(3):
-            pdf_bytes = await client.download_shipping_label(task_id)
-            if pdf_bytes is not None:
-                break
-            await asyncio.sleep(2)
-    except avito_client.AvitoAPIError as exc:
-        logger.exception("cb_order_label: failed for order %s", order_id)
-        await callback.message.answer(f"⚠️ Avito отклонил генерацию этикетки: {exc}")
-        return
-    if pdf_bytes is None:
-        await callback.message.answer("⏳ Этикетка ещё генерируется, нажмите «🏷 Этикетка» ещё раз через минуту.")
-        return
-    await callback.message.answer_document(
-        BufferedInputFile(pdf_bytes, filename=f"label_{order_id}.pdf"), caption="🏷 Этикетка для отправки"
-    )
+    if order_id is not None and account_id is not None:
+        await _show_order_detail(message, order_id, account_id)

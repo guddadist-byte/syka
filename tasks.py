@@ -324,7 +324,7 @@ async def _notify_new_order(bot: Bot, order: dict, account_id: int) -> None:
     if total is not None:
         text += f"\n💰 {total} ₽"
 
-    kb = keyboards.order_list_kb([order], account_id)
+    kb = keyboards.order_notification_kb(order.get("id"), account_id)
     for user in recipients:
         try:
             await bot.send_message(user.telegram_id, text, reply_markup=kb)

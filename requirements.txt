@@ -3,3 +3,5 @@ aiohttp>=3.10,<4.0
 aiohttp-socks>=0.9,<1.0
 aiosqlite>=0.20,<1.0
 python-dotenv>=1.0,<2.0
+python-barcode>=0.15,<1.0
+Pillow>=10.0,<11.0

@@ -343,49 +343,64 @@ def review_reply_kb(unanswered: list[tuple[int, str]], account_id: int) -> Inlin
     return builder.as_markup()
 
 
-def order_list_kb(orders_with_accounts: list[tuple[dict, int]]) -> InlineKeyboardMarkup:
-    """One button per order per entry in its `availableActions` — built from
-    what Avito actually says is possible for that order, not hardcoded per
-    delivery type (the pvz/dbs/rdbs/courier/cnc/postamat action table in
-    Avito's docs couldn't be reliably extracted column-by-column). Orders
-    are shown aggregated across every Avito account, so each one carries
-    its own account_id rather than a single shared one.
+def order_notification_kb(order_id, account_id: int) -> InlineKeyboardMarkup:
+    """Push notification for a brand-new order (see tasks._notify_new_order)
+    — one button straight into the same detail card "📦 Заказы Avito" opens
+    (cb_order_view), so tasks.py doesn't need to duplicate any rendering."""
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔍 Открыть заказ", callback_data=f"ordview_{order_id}:{account_id}"))
+    return builder.as_markup()
 
-    checkConfirmationCode and shipping-label generation aren't in
-    availableActions at all (per Avito's docs neither is order-scoped the
-    same way) — shown for pvz orders specifically, since both are
-    documented as pvz-only.
+
+def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]]) -> InlineKeyboardMarkup:
+    """One button per order — status + item name, like chat_list_kb.
+    Tapping one opens its detail card (see order_detail_kb)."""
+    builder = InlineKeyboardBuilder()
+    for order, account_id in orders_with_accounts:
+        order_id = order.get("id")
+        status_label = constants.ORDER_STATUS_LABELS.get(order.get("status", ""), "📦")
+        items = order.get("items") or []
+        title = (items[0].get("title") if items else None) or "(без названия)"
+        label = f"{status_label} {title[:40]}"
+        builder.row(InlineKeyboardButton(text=label, callback_data=f"ordview_{order_id}:{account_id}"))
+    return builder.as_markup()
+
+
+def order_detail_kb(order: dict, account_id: int) -> InlineKeyboardMarkup:
+    """Action buttons for a single order — built from what Avito actually
+    says is possible (`availableActions`), not hardcoded per delivery type
+    (the pvz/dbs/rdbs/courier/cnc/postamat action table in Avito's docs
+    couldn't be reliably extracted column-by-column).
+
+    checkConfirmationCode isn't in availableActions at all (per Avito's
+    docs it isn't order-scoped the same way) — shown for pvz orders
+    specifically, since it's documented as pvz-only.
     """
     builder = InlineKeyboardBuilder()
+    order_id = order.get("id")
     action_labels = {
         "confirm": "✅ Подтвердить",
         "reject": "❌ Отменить",
         "setMarkings": "🏷 Маркировка",
         "setCNCDetails": "📍 Подготовить самовывоз",
     }
-    for order, account_id in orders_with_accounts:
-        order_id = order.get("id")
-        row = []
-        for action in order.get("availableActions") or []:
-            name = action.get("name")
-            if name not in action_labels:
-                continue
-            if name in ("confirm", "reject"):
-                callback_data = f"ordact_{name}:{order_id}:{account_id}"
-            elif name == "setMarkings":
-                callback_data = f"ordmark_{order_id}:{account_id}"
-            else:
-                callback_data = f"ordcnc_{order_id}:{account_id}"
-            row.append(InlineKeyboardButton(text=action_labels[name], callback_data=callback_data))
-        if row:
-            builder.row(*row)
+    row = []
+    for action in order.get("availableActions") or []:
+        name = action.get("name")
+        if name not in action_labels:
+            continue
+        if name in ("confirm", "reject"):
+            callback_data = f"ordact_{name}:{order_id}:{account_id}"
+        elif name == "setMarkings":
+            callback_data = f"ordmark_{order_id}:{account_id}"
+        else:
+            callback_data = f"ordcnc_{order_id}:{account_id}"
+        row.append(InlineKeyboardButton(text=action_labels[name], callback_data=callback_data))
+    if row:
+        builder.row(*row)
 
-        if (order.get("delivery") or {}).get("serviceType") == "pvz":
-            pvz_row = [
-                InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"),
-                InlineKeyboardButton(text="🏷 Этикетка", callback_data=f"ordlabel_{order_id}:{account_id}"),
-            ]
-            builder.row(*pvz_row)
+    if (order.get("delivery") or {}).get("serviceType") == "pvz":
+        builder.row(InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"))
     return builder.as_markup()
 
 

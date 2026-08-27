@@ -10,10 +10,14 @@ wrong.
 from __future__ import annotations
 
 import fcntl
+import io
 import math
 import os
 from datetime import datetime, timedelta
 from typing import IO
+
+import barcode
+from barcode.writer import ImageWriter
 
 from constants import MSK_OFFSET_HOURS
 
@@ -62,6 +66,17 @@ def haversine_distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> 
     dlambda = math.radians(lon2 - lon1)
     a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
     return 2 * r * math.asin(math.sqrt(a))
+
+
+def generate_barcode_png(data: str) -> bytes:
+    """Renders a Code128 barcode (the standard symbology for tracking
+    numbers) as a PNG, for order tracking numbers shown in "📦 Заказы
+    Avito" — a local, instant render instead of depending on Avito's own
+    async label-generation task, whose turnaround time isn't documented."""
+    code = barcode.get("code128", data, writer=ImageWriter())
+    buf = io.BytesIO()
+    code.write(buf, options={"write_text": True})
+    return buf.getvalue()
 
 
 class SingletonLockError(RuntimeError):
