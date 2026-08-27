@@ -401,6 +401,7 @@ def order_detail_kb(order: dict, account_id: int) -> InlineKeyboardMarkup:
 
     if (order.get("delivery") or {}).get("serviceType") == "pvz":
         builder.row(InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"))
+    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ordback"))
     return builder.as_markup()
 
 

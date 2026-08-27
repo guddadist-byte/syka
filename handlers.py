@@ -2112,6 +2112,12 @@ async def cb_order_view(callback: CallbackQuery) -> None:
     await _show_order_detail(callback.message, order_id, int(account_id_str))
 
 
+@crm_router.callback_query(F.data == "ordback")
+async def cb_order_back(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_all_orders(callback.message, callback.from_user.id)
+
+
 @crm_router.callback_query(F.data.startswith("ordact_"))
 async def cb_order_action(callback: CallbackQuery) -> None:
     await callback.answer()
