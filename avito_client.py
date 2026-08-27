@@ -30,7 +30,12 @@ import aiohttp
 import database
 import models
 import utils
-from constants import AVITO_MAX_RETRIES, AVITO_MIN_REQUEST_INTERVAL_SECONDS, INFLIGHT_SHUTDOWN_TIMEOUT_SECONDS
+from constants import (
+    AVITO_MAX_RETRIES,
+    AVITO_MIN_REQUEST_INTERVAL_SECONDS,
+    INFLIGHT_SHUTDOWN_TIMEOUT_SECONDS,
+    ORDER_MAX_PAGES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -364,11 +369,24 @@ class AvitoClient:
         # live: 400 "... does not exist in enum") — it wants the query
         # param repeated once per status, which aiohttp only produces from
         # a list of (key, value) pairs, not a dict.
-        params: list[tuple[str, str | int]] = [("limit", limit)]
+        params_base: list[tuple[str, str | int]] = [("limit", limit)]
         if statuses:
-            params.extend(("statuses", status) for status in statuses)
-        data = await self._request("GET", "/order-management/1/orders", params=params)
-        return data.get("orders", [])
+            params_base.extend(("statuses", status) for status in statuses)
+        # This endpoint paginates via "page" (not "offset" like chats/
+        # reviews), max 20 per page, with "hasMore" telling us whether to
+        # keep going — confirmed live: without walking every page, an
+        # account with dozens of active orders only ever showed the first
+        # ~10-20 of them.
+        all_orders: list[dict] = []
+        for page in range(1, ORDER_MAX_PAGES + 1):
+            data = await self._request(
+                "GET", "/order-management/1/orders", params=[*params_base, ("page", page)]
+            )
+            orders = data.get("orders") or []
+            all_orders.extend(orders)
+            if not orders or not data.get("hasMore"):
+                break
+        return all_orders
 
     async def apply_order_transition(self, order_id: str, transition: str) -> dict:
         return await self._request(

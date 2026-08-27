@@ -2084,7 +2084,13 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int) -
         lines.append(f"🚚 Служба доставки: {html.escape(str(service))}")
 
     detail_text = "\n".join(lines)
-    kb = keyboards.order_detail_kb(order, account_id)
+
+    chat_short_id = None
+    order_chat_id = ((order.get("items") or [{}])[0]).get("chatId")
+    if order_chat_id:
+        chat_short_id = await bot_cache.get_short_id(order_chat_id)
+
+    kb = keyboards.order_detail_kb(order, account_id, chat_short_id)
 
     barcode_png = None
     if track_number:

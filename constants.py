@@ -45,6 +45,9 @@ ORDER_STATUS_LABELS: dict[str, str] = {
 # Statuses worth showing/polling — excludes final states (canceled/
 # delivered/closed) where there's nothing left to do.
 ORDER_ACTIVE_STATUSES = ["on_confirmation", "ready_to_ship", "in_transit", "on_return", "in_dispute"]
+# Safety ceiling for GET .../orders pagination (20/page) — well above any
+# realistic order count, guards against an "hasMore" that never goes false.
+ORDER_MAX_PAGES = 20
 
 # --- User status ---------------------------------------------------------
 STATUS_PENDING = "pending"

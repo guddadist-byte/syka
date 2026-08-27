@@ -366,7 +366,7 @@ def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]]) -> InlineKeyboa
     return builder.as_markup()
 
 
-def order_detail_kb(order: dict, account_id: int) -> InlineKeyboardMarkup:
+def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = None) -> InlineKeyboardMarkup:
     """Action buttons for a single order — built from what Avito actually
     says is possible (`availableActions`), not hardcoded per delivery type
     (the pvz/dbs/rdbs/courier/cnc/postamat action table in Avito's docs
@@ -401,6 +401,10 @@ def order_detail_kb(order: dict, account_id: int) -> InlineKeyboardMarkup:
 
     if (order.get("delivery") or {}).get("serviceType") == "pvz":
         builder.row(InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"))
+    if chat_short_id:
+        builder.row(
+            InlineKeyboardButton(text="💬 Чат с покупателем", callback_data=f"{constants.PREFIX_CHAT}_{chat_short_id}")
+        )
     builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ordback"))
     return builder.as_markup()
 
