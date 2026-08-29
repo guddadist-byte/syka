@@ -10,32 +10,7 @@
 <body>
 
 <div id="splash">
-  <svg class="splash-logo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="diamondGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#ffffff"/>
-        <stop offset="55%" stop-color="#f2d9dc"/>
-        <stop offset="100%" stop-color="#c94f5c"/>
-      </linearGradient>
-      <linearGradient id="diamondShade" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="#ffffff"/>
-        <stop offset="100%" stop-color="#e8b9bd"/>
-      </linearGradient>
-    </defs>
-    <circle cx="100" cy="100" r="96" fill="#7a1522"/>
-    <circle cx="100" cy="100" r="96" fill="none" stroke="#ff8a92" stroke-width="1.5" opacity="0.5"/>
-    <g>
-      <polygon points="100,34 146,80 100,166 54,80" fill="url(#diamondGrad)"/>
-      <polygon points="100,34 146,80 100,100" fill="url(#diamondShade)" opacity="0.9"/>
-      <polygon points="54,80 100,100 100,166" fill="#e7c3c6" opacity="0.85"/>
-      <polygon points="146,80 100,100 100,166" fill="#d68f95" opacity="0.85"/>
-      <polygon points="100,34 54,80 100,100" fill="#ffffff" opacity="0.95"/>
-    </g>
-    <g stroke="#ffe9ea" stroke-width="1.2" opacity="0.7">
-      <line x1="100" y1="34" x2="100" y2="166"/>
-      <line x1="54" y1="80" x2="146" y2="80"/>
-    </g>
-  </svg>
+  <img class="splash-logo" src="assets/logo.png" alt="GUDDA">
   <div class="splash-title">GUDDA</div>
   <div class="splash-by">by saibioff</div>
   <div class="splash-claude">assembled with Claude</div>
@@ -45,14 +20,7 @@
 
   <div class="app-header" id="header">
     <button class="back-btn" id="backBtn" hidden>‹ Назад</button>
-    <svg class="app-logo" id="headerLogo" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="100" cy="100" r="96" fill="#7a1522"/>
-      <polygon points="100,34 146,80 100,166 54,80" fill="#f2d9dc"/>
-      <polygon points="100,34 146,80 100,100" fill="#e8b9bd" opacity="0.9"/>
-      <polygon points="54,80 100,100 100,166" fill="#e7c3c6" opacity="0.85"/>
-      <polygon points="146,80 100,100 100,166" fill="#d68f95" opacity="0.85"/>
-      <polygon points="100,34 54,80 100,100" fill="#ffffff" opacity="0.95"/>
-    </svg>
+    <img class="app-logo" id="headerLogo" src="assets/logo.png" alt="GUDDA">
     <div class="app-header-text">
       <div class="app-title" id="headerTitle">GUDDA CRM</div>
       <div class="app-subtitle" id="headerSubtitle">загрузка…</div>
