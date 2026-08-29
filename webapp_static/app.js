@@ -124,7 +124,7 @@ async function render(screen, params, isBack) {
 
 SCREENS.home = renderHome;
 async function renderHome() {
-  setHeader("GUDDA CRM", state.me ? state.me.role_label : "", false);
+  setHeader(state.me ? state.me.full_name : "GUDDA CRM", state.me ? state.me.role_label : "", false);
   loading();
   try {
     const me = await apiGet("/me");
@@ -135,6 +135,7 @@ async function renderHome() {
       if (chats.chats.length) unreadCount = chats.chats.length;
     } catch (e) {}
 
+    headerTitle.textContent = me.full_name || "GUDDA CRM";
     headerSubtitle.textContent = me.role_label + (me.points.length ? " · " + me.points.map(p => p.name).join(", ") : "");
 
     screenRoot.innerHTML = `
