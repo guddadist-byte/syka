@@ -75,7 +75,7 @@ async def main() -> None:
                 await bot.set_chat_menu_button(
                     menu_button=MenuButtonWebApp(text="📱 Приложение", web_app=WebAppInfo(url=static_cfg.webapp_url))
                 )
-                web_app = webapp.create_app(static_cfg.bot_token)
+                web_app = webapp.create_app(static_cfg.bot_token, bot, static_cfg.db_path)
                 web_runner = web.AppRunner(web_app)
                 await web_runner.setup()
                 site = web.TCPSite(web_runner, static_cfg.webapp_host, static_cfg.webapp_port)
