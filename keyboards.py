@@ -9,13 +9,23 @@ payload that itself needs more than one field uses a second, app-owned
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, WebAppInfo
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 import constants
 from bot_cache import CachedChat
 from constants import ROLE_LABELS
 from models import Point, Template, User
+
+# Set once at startup (main.py, from StaticConfig.webapp_url) — a module
+# singleton rather than a main_menu_kb parameter so the many existing call
+# sites in handlers.py don't all need to learn about the Mini App URL.
+_webapp_url: str | None = None
+
+
+def set_webapp_url(url: str | None) -> None:
+    global _webapp_url
+    _webapp_url = url
 
 
 # --- main menu ---------------------------------------------------------------
@@ -34,6 +44,8 @@ def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
         builder.row(KeyboardButton(text=constants.BTN_MY_TEMPLATES))
     if constants.ROLE_ORDER.get(role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
         builder.row(KeyboardButton(text=constants.BTN_LEADERSHIP), KeyboardButton(text=constants.BTN_ADMIN_PANEL))
+    if _webapp_url:
+        builder.row(KeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=_webapp_url)))
     return builder.as_markup(resize_keyboard=True)
 
 

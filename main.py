@@ -18,6 +18,8 @@ import logging
 import aiohttp
 from aiogram import Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import MenuButtonWebApp, WebAppInfo
+from aiohttp import web
 
 import ai_handlers
 import avito_client
@@ -25,8 +27,10 @@ import bot_cache
 import config
 import database
 import handlers
+import keyboards
 import tasks
 import utils
+import webapp
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +38,7 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     static_cfg = config.load_static_config()
     logging.basicConfig(level=static_cfg.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    keyboards.set_webapp_url(static_cfg.webapp_url)
 
     lock_handle = utils.acquire_singleton_lock(static_cfg.pid_file)
     try:
@@ -61,9 +66,21 @@ async def main() -> None:
         dp.include_router(handlers.admin_router)
 
         avito_session = aiohttp.ClientSession()
+        web_runner: web.AppRunner | None = None
         try:
             await avito_client.init_pool(avito_session)
             await avito_client.reload_accounts()
+
+            if static_cfg.webapp_url:
+                await bot.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(text="📱 Приложение", web_app=WebAppInfo(url=static_cfg.webapp_url))
+                )
+                web_app = webapp.create_app(static_cfg.bot_token)
+                web_runner = web.AppRunner(web_app)
+                await web_runner.setup()
+                site = web.TCPSite(web_runner, static_cfg.webapp_host, static_cfg.webapp_port)
+                await site.start()
+                logger.info("Mini App backend listening on %s:%s", static_cfg.webapp_host, static_cfg.webapp_port)
 
             poll_tasks = await tasks.run_all_polls(bot, static_cfg.db_path)
             try:
@@ -72,6 +89,8 @@ async def main() -> None:
                 await tasks.stop_all(poll_tasks)
                 await avito_client.wait_for_inflight_sends()
         finally:
+            if web_runner is not None:
+                await web_runner.cleanup()
             await avito_session.close()
             await bot.session.close()
     finally:

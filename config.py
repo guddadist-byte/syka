@@ -22,6 +22,9 @@ class StaticConfig:
     log_level: str
     pid_file: str
     credentials_path: str
+    webapp_host: str
+    webapp_port: int
+    webapp_url: str | None
 
 
 def _require_env(name: str) -> str:
@@ -45,6 +48,9 @@ def load_static_config() -> StaticConfig:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         pid_file=pid_file,
         credentials_path=credentials_path,
+        webapp_host=os.environ.get("WEBAPP_HOST", "127.0.0.1"),
+        webapp_port=int(os.environ.get("WEBAPP_PORT", "8080")),
+        webapp_url=os.environ.get("WEBAPP_URL") or None,
     )
 
 
