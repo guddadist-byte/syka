@@ -32,6 +32,7 @@ class CachedMessage:
     text: str
     has_image: bool
     created_at: datetime
+    is_read: bool = True
 
 
 @dataclass
@@ -87,30 +88,22 @@ async def get_short_id(chat_id: str) -> str:
         return short_id
 
 
-def _trailing_unread(messages: "deque[CachedMessage]", read_before: datetime | None = None) -> int:
-    """Count of client ("in") messages since the last staff reply.
+def _real_unread_count(messages: "deque[CachedMessage]") -> int:
+    """Real unread count, straight from Avito's own per-message is_read
+    field (GET .../messenger/v3/.../messages/ — confirmed in Avito's own
+    OpenAPI spec, is_read: "True, если сообщение уже было прочитано
+    запрашиваемым пользователем"). Not a local guess: a client ("in")
+    message is unread exactly when Avito itself says it hasn't been read
+    yet — this is true whether a human read it through this bot, through
+    Avito's own app, or not at all, since is_read is refreshed from a real
+    Avito response on every poll (see tasks._process_chat).
 
-    Avito's chat-list API has no unread/read field at all (confirmed live:
-    a chat object's only top-level keys are context/created/id/
-    last_message/updated/users) — this is the only signal we actually
-    have, and it happens to be a good one: it's derived fresh from the
-    real message history every time, so it self-corrects the moment *any*
-    reply lands as the newest message, whether sent through this bot or
-    directly in Avito's own app/website.
-
-    `read_before` is the second boundary besides "last out-reply": a chat
-    can be marked read (see mark_read) without an actual reply, and that
-    boundary has to stop the trailing count too, or the next incoming
-    message would drag every already-dismissed message back into "unread".
+    CachedMessage.is_read defaults to True, so a message hydrated from our
+    own DB at startup (which doesn't persist this field — see
+    tasks._build_initial_messages) counts as read until a live poll
+    confirms otherwise, rather than resurrecting a stale local guess.
     """
-    count = 0
-    for m in reversed(messages):
-        if m.direction != "in":
-            break
-        if read_before is not None and m.created_at <= read_before:
-            break
-        count += 1
-    return count
+    return sum(1 for m in messages if m.direction == "in" and not m.is_read)
 
 
 async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: int,
@@ -144,7 +137,7 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
             if initial_messages:
                 chat.messages.extend(initial_messages)
                 chat.last_message_at = chat.messages[-1].created_at
-                chat.unread_count = _trailing_unread(chat.messages, read_at)
+                chat.unread_count = _real_unread_count(chat.messages)
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:
@@ -183,6 +176,14 @@ async def resolve_chat(key: str) -> CachedChat | None:
 
 
 async def add_message(chat_id: str, message: CachedMessage) -> bool:
+    """Appends a genuinely new message, or — if this avito_message_id is
+    already cached — refreshes just its is_read flag in place and returns
+    False. The refresh path matters: tasks._process_chat's durable
+    known_ids dedup means an already-seen message is never re-persisted or
+    re-notified, but Avito's own is_read for it can still flip from False
+    to True later (a human reads it directly in Avito's app, without ever
+    sending a reply) — without updating it here, that chat would stay
+    "unread" in our cache forever."""
     async with _lock:
         chat = _chats.get(chat_id)
         if chat is None:
@@ -190,6 +191,9 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
         if message.avito_message_id is not None:
             for existing in chat.messages:
                 if existing.avito_message_id == message.avito_message_id:
+                    if existing.is_read != message.is_read:
+                        existing.is_read = message.is_read
+                        chat.unread_count = _real_unread_count(chat.messages)
                     return False
         chat.messages.append(message)
         if len(chat.messages) > 1 and chat.messages[-2].created_at > message.created_at:
@@ -205,7 +209,7 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
             chat.messages.clear()
             chat.messages.extend(ordered)
         chat.last_message_at = max(chat.last_message_at or message.created_at, message.created_at)
-        chat.unread_count = _trailing_unread(chat.messages, chat.last_read_at)
+        chat.unread_count = _real_unread_count(chat.messages)
         return True
 
 
@@ -234,19 +238,6 @@ async def get_unread_for_points(point_ids: set[int] | None) -> list[CachedChat]:
         result = [c for c in result if c.point_id in point_ids]
     result.sort(key=lambda c: c.last_message_at or datetime.min, reverse=True)
     return result
-
-
-async def get_unread_chat_ids_for_account(avito_account_id: int) -> set[str]:
-    """Used by tasks.poll_account_loop to reconcile our locally-tracked
-    unread chats against Avito's own unread_only=true response — a chat
-    read directly in Avito's own app/site (not through this bot) never
-    triggers add_message/mark_read on our side, so without this check it
-    would sit "unread" here forever."""
-    async with _lock:
-        return {
-            c.chat_id for c in _chats.values()
-            if c.avito_account_id == avito_account_id and c.unread_count > 0
-        }
 
 
 async def get_recent_replies_for_points(point_ids: set[int] | None, within: timedelta) -> list[CachedChat]:

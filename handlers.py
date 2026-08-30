@@ -470,7 +470,7 @@ async def cb_refresh(callback: CallbackQuery, state: FSMContext) -> None:
                     chat.chat_id,
                     bot_cache.CachedMessage(
                         avito_message_id=m.message_id, direction=m.direction, text=m.text,
-                        has_image=m.has_image, created_at=created_at,
+                        has_image=m.has_image, created_at=created_at, is_read=m.is_read,
                     ),
                 )
         except avito_client.AvitoAPIError:

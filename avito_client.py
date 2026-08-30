@@ -171,6 +171,22 @@ class AvitoClient:
         for _attempt in range(AVITO_MAX_RETRIES):
             try:
                 async with self._session.request(method, url, headers=headers, **kwargs) as resp:
+                    # X-RateLimit-Limit/-Remaining are documented in Avito's
+                    # own OpenAPI spec for this API (per-minute window) —
+                    # surfacing them here means a future rate-limit episode
+                    # shows up directly in logs instead of needing another
+                    # multi-hour live debugging session to rediscover.
+                    remaining_header = resp.headers.get("X-RateLimit-Remaining")
+                    if remaining_header is not None:
+                        try:
+                            remaining = int(remaining_header)
+                        except ValueError:
+                            remaining = None
+                        if remaining is not None and remaining <= 5:
+                            logger.warning(
+                                "%s %s: only %s request(s) left this minute (limit=%s)",
+                                method, path, remaining, resp.headers.get("X-RateLimit-Limit"),
+                            )
                     if resp.status == 401 and allow_token_retry:
                         allow_token_retry = False
                         token = await self._refresh_token()
@@ -184,6 +200,19 @@ class AvitoClient:
                         continue
                     if resp.status >= 400:
                         text = await resp.text()
+                        if resp.status == 400 and remaining_header == "0":
+                            # Confirmed via Avito's own spec that this header
+                            # is a real per-minute quota, not a guess: a 400
+                            # arriving together with it at 0 is the rate
+                            # limit, not a malformed request — back off and
+                            # retry like the 429 branch above, rather than
+                            # failing the whole poll cycle immediately (what
+                            # silently starved every cycle before this was
+                            # understood).
+                            await asyncio.sleep(backoff)
+                            backoff *= 2
+                            last_error = AvitoRateLimitError(f"{method} {path} -> 400 (rate limit exhausted)")
+                            continue
                         raise AvitoAPIError(f"{method} {path} -> {resp.status}: {text}")
                     # Don't gate on resp.content_length: it reflects the
                     # Content-Length *header*, which is absent for chunked
@@ -275,6 +304,12 @@ class AvitoClient:
                 elif "link" in content:
                     link = content["link"]
                     text = f"🔗 {link.get('text') or link.get('url') or 'Ссылка'}"
+            # is_read: Avito's own read-receipt truth for this message ("was
+            # it read by the account making this request") — confirmed to
+            # exist in the official v3 messages schema. Default True if
+            # somehow absent so a missing field can never manufacture a
+            # false "unread" (only an explicit False counts as unread).
+            is_read = raw.get("is_read")
             messages.append(
                 models.AvitoMessage(
                     message_id=raw["id"],
@@ -283,6 +318,7 @@ class AvitoClient:
                     has_image="image" in content,
                     created_at=(utils.utcnow_str() if created is None
                                 else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),
+                    is_read=True if is_read is None else bool(is_read),
                 )
             )
         # Never assumed to already be chronological — the API's actual

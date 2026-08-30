@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
     backoff = constants.ERROR_BACKOFF_BASE_SECONDS
     cycle = 0
-    # Consecutive-miss counter per chat_id, used only by the unread
-    # reconciliation below — lives here (not in bot_cache) since it's pure
-    # poll-cadence bookkeeping for this one account's loop, not shared
-    # state anything else needs to see.
-    unread_miss_streak: dict[str, int] = {}
     while True:
         client = avito_client.get_pool().get(account.id)
         if client is None:
@@ -46,10 +41,13 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
             # fewer chats to walk per poll, so a cycle finishes faster and
             # (post-restart especially) stops burning the ~1 req/sec/account
             # get_messages() budget on chats that haven't changed. Every
-            # Nth cycle does a full unfiltered pass as a safety net, since
-            # Avito's server-side "unread" semantics were never confirmed
-            # to match our own (its chat objects carry no read/unread field
-            # at all — see avito_client.get_chats).
+            # Nth cycle does a full unfiltered pass as a safety net: a chat
+            # can drop out of Avito's own unread_only list (a human read it
+            # directly in Avito's app) without this bot ever refetching its
+            # messages in between, so our cached is_read (see bot_cache)
+            # could lag up to one full-sync interval behind reality — an
+            # acceptable, self-correcting bound (a few minutes), not the
+            # "forever" staleness this whole area used to have.
             is_full_sync = cycle % constants.FULL_SYNC_EVERY_N_POLLS == 0
             unread_only = not is_full_sync
 
@@ -66,49 +64,6 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
 
             for chat in chats:
                 await _process_chat(chat, account, bot, client)
-
-            if unread_only:
-                # Reconcile: a chat read directly in Avito's own app/site
-                # (never touching this bot) never runs add_message/mark_read
-                # on our side, so its locally-tracked unread_count would
-                # otherwise sit stale forever — this is exactly what the
-                # user reported (dozens of long-dead "unread" chats). Only
-                # clear on a *second* consecutive miss (not the first), in
-                # case Avito's own unread_only index lags a real new
-                # message by one cycle — a false clear here would silently
-                # hide a real message (_process_chat only recomputes
-                # unread_count when last_message_at changes), which is a
-                # worse failure than the staleness bug being fixed.
-                avito_unread_ids = {c.chat_id for c in chats}
-                locally_unread_ids = await bot_cache.get_unread_chat_ids_for_account(account.id)
-                # Temporary diagnostic: the whole reconciliation above rests
-                # on an unconfirmed assumption about Avito's real
-                # unread_only semantics (see the comment above) — this
-                # line exists purely to let us read, from prod logs,
-                # whether that assumption actually holds before writing
-                # any further fix. Remove once confirmed one way or the
-                # other.
-                logger.info(
-                    "unread-reconcile[%s]: avito_unread=%d local_unread=%d stale_candidates=%s",
-                    account.name, len(avito_unread_ids), len(locally_unread_ids),
-                    sorted(locally_unread_ids - avito_unread_ids)[:10],
-                )
-                for chat_id in locally_unread_ids:
-                    if chat_id in avito_unread_ids:
-                        unread_miss_streak.pop(chat_id, None)
-                        continue
-                    streak = unread_miss_streak.get(chat_id, 0) + 1
-                    if streak >= constants.UNREAD_RECONCILE_MISS_THRESHOLD:
-                        await bot_cache.mark_read(chat_id)
-                        await database.set_chat_unread_count(chat_id, 0)
-                        unread_miss_streak.pop(chat_id, None)
-                    else:
-                        unread_miss_streak[chat_id] = streak
-                # Drop bookkeeping for chats no longer locally unread at all
-                # (cleared via a reply/manual "Прочитано" elsewhere) so this
-                # dict doesn't grow without bound.
-                for stale_key in unread_miss_streak.keys() - locally_unread_ids:
-                    unread_miss_streak.pop(stale_key, None)
 
             await database.set_avito_account_error(account.id, None)
             backoff = constants.ERROR_BACKOFF_BASE_SECONDS
@@ -199,7 +154,18 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     )
 
     incoming_last = utils.parse_utc(chat.last_message_at) if chat.last_message_at else None
-    if cached.last_message_at is not None and incoming_last is not None and incoming_last <= cached.last_message_at:
+    if (
+        cached.last_message_at is not None and incoming_last is not None
+        and incoming_last <= cached.last_message_at
+        and cached.unread_count == 0
+    ):
+        # Nothing new AND nothing outstanding to double-check — safe to
+        # skip the get_messages() round trip entirely. A chat we still
+        # count as unread bypasses this even with an unchanged timestamp:
+        # a human can read an old message directly in Avito's own app
+        # without ever sending a new one, which is real_unread_count's
+        # whole reason for existing (see bot_cache) — without re-fetching
+        # here, that flip would never be observed.
         return
 
     try:
@@ -216,13 +182,6 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     new_in_messages: list[bot_cache.CachedMessage] = []
 
     for message in messages:
-        if message.message_id is not None and message.message_id in known_ids:
-            # Already persisted before a restart — bot_cache is in-memory
-            # and resets on every restart, so without this DB-backed check
-            # every message in Avito's recent history would look "new"
-            # again on the first poll after a restart and re-notify.
-            continue
-
         created_at = utils.parse_utc(message.created_at) if message.created_at else datetime.utcnow()
         cached_message = bot_cache.CachedMessage(
             avito_message_id=message.message_id,
@@ -230,8 +189,20 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             text=message.text,
             has_image=message.has_image,
             created_at=created_at,
+            is_read=message.is_read,
         )
         is_new = await bot_cache.add_message(chat.chat_id, cached_message)
+
+        if message.message_id is not None and message.message_id in known_ids:
+            # Already persisted before a restart — bot_cache is in-memory
+            # and resets on every restart, so without this DB-backed check
+            # every message in Avito's recent history would look "new"
+            # again on the first poll after a restart and re-notify.
+            # add_message() above still ran though, so a message we
+            # already knew about but that flipped is_read since last time
+            # gets that refreshed regardless of this continue.
+            continue
+
         if not is_new:
             continue
 

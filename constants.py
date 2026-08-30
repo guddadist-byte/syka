@@ -129,16 +129,10 @@ DOUBLE_CLICK_TTL_SECONDS = 3.0
 
 POLL_INTERVAL_SECONDS = 15
 FULL_SYNC_EVERY_N_POLLS = 20
-# Safety ceiling for GET .../chats pagination during polling (100/page) —
-# 2000 chats/account is far beyond any realistic unread or full-sync
-# backlog; guards against an API quirk causing an infinite pagination loop.
-CHAT_POLL_MAX_PAGES = 20
-# A chat must be absent from Avito's own unread_only response this many
-# consecutive non-full-sync cycles before we locally clear it as read —
-# guards against a hypothetical one-cycle indexing lag on Avito's side
-# wrongly hiding a still-real unread message; 2 cycles = ~30s worst-case
-# extra staleness in exchange for that safety.
-UNREAD_RECONCILE_MISS_THRESHOLD = 2
+# Safety ceiling for GET .../chats pagination during polling (100/page).
+# Avito's own OpenAPI spec caps the offset parameter at 1000, so 10 pages
+# (offset up to 900) is the real usable ceiling, not an arbitrary guess.
+CHAT_POLL_MAX_PAGES = 10
 ACCOUNT_RELOAD_INTERVAL_SECONDS = 300
 MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
 MESSAGE_RETENTION_DAYS = 30

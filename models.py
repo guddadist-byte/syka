@@ -244,4 +244,5 @@ class AvitoMessage:
     text: str
     has_image: bool
     created_at: str
+    is_read: bool = True
 
