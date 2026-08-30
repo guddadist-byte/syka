@@ -576,7 +576,11 @@ async function renderOrderDetail(params) {
     }
 
     if (order.has_barcode) {
-      apiBlobUrl(`/orders/${params.accountId}/${params.orderId}/barcode.png`)
+      // track_number came back with this same order-detail response —
+      // pass it straight through so the backend renders the PNG locally
+      // instead of re-fetching Avito's whole order list a second time
+      // just to look it up again (that was the real ~20s slowdown).
+      apiBlobUrl(`/orders/${params.accountId}/${params.orderId}/barcode.png?track=${encodeURIComponent(order.track_number)}`)
         .then(url => { const img = document.getElementById("barcodeImg"); if (img) img.src = url; })
         .catch(() => { const img = document.getElementById("barcodeImg"); if (img) img.remove(); });
     }

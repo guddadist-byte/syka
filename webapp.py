@@ -644,20 +644,31 @@ async def api_order_detail(request: web.Request) -> web.Response:
 
 
 async def api_order_barcode(request: web.Request) -> web.Response:
-    account_id = int(request.match_info["account_id"])
-    order_id = request.match_info["order_id"]
-    client = avito_client.get_pool().get(account_id)
-    if client is None:
-        return web.Response(status=404)
-    try:
-        orders = await client.get_orders()
-    except avito_client.AvitoAPIError:
-        return web.Response(status=502)
-    order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
-    if order is None:
-        return web.Response(status=404)
-    delivery_info = order.get("delivery") or {}
-    track_number = delivery_info.get("dispatchNumber") or delivery_info.get("trackingNumber")
+    # The order-detail response (api_order_detail, just above) already
+    # resolved and returned track_number — the frontend fetches this image
+    # right after that response, so it passes the value straight through
+    # as ?track=... instead of us re-deriving it. Re-deriving it here used
+    # to mean a second full paginated client.get_orders() call (every page
+    # of every active order on the account, just to find one by id) on top
+    # of the one api_order_detail already made moments earlier — with ~97
+    # active orders that was the entire ~20s of "the barcode takes forever
+    # to show up", not the (near-instant) PNG rendering itself.
+    track_number = request.query.get("track")
+    if not track_number:
+        account_id = int(request.match_info["account_id"])
+        order_id = request.match_info["order_id"]
+        client = avito_client.get_pool().get(account_id)
+        if client is None:
+            return web.Response(status=404)
+        try:
+            orders = await client.get_orders()
+        except avito_client.AvitoAPIError:
+            return web.Response(status=502)
+        order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
+        if order is None:
+            return web.Response(status=404)
+        delivery_info = order.get("delivery") or {}
+        track_number = delivery_info.get("dispatchNumber") or delivery_info.get("trackingNumber")
     if not track_number:
         return web.Response(status=404)
     png_bytes = utils.generate_barcode_png(str(track_number))
