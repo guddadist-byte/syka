@@ -219,6 +219,20 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             chat.chat_id, avito_account_id=account.id, point_id=point_id,
             last_message_at=sent_at_str, last_message_text=message.text, last_message_dir="in",
         )
+
+        if message.is_read:
+            # Avito itself says this message has already been read, so by
+            # definition it isn't something awaiting a reply right now —
+            # whoever read it, whenever. Never notify about it, not even
+            # the first time we see it: known_ids only covers what this bot
+            # persisted itself, while a chat's history on Avito predates us
+            # (and reaches further back than the 50 messages hydration
+            # restores). Without this check the first full sync after a
+            # restart walks the entire old archive and pings about every
+            # long-since-answered conversation in it. It is still persisted
+            # above — the archive backfills silently, it just doesn't ring.
+            continue
+
         new_in_messages.append(cached_message)
 
     if new_in_messages:
