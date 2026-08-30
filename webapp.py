@@ -299,11 +299,39 @@ async def api_chats(request: web.Request) -> web.Response:
     return web.json_response({"chats": [_serialize_chat(c) for c in chats]})
 
 
+async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
+    """Mirrors handlers.py's _refresh_chat_from_avito — kept as a separate
+    copy rather than a shared import since webapp.py and handlers.py are
+    deliberately independent of each other (see the project's import
+    graph). Live-syncs is_read/new messages from Avito for one chat, since
+    background polling short-circuits chats it already believes are fully
+    read to save API calls — fine for the ambient list, but a chat someone
+    is actually opening deserves the real current state (e.g. a reply sent
+    directly in the Avito app, not through the bot/mini-app, could take up
+    to a poll interval to otherwise be reflected here)."""
+    client = avito_client.get_pool().get(chat.avito_account_id)
+    if client is None:
+        return
+    try:
+        for m in await client.get_messages(chat.chat_id):
+            created_at = utils.parse_utc(m.created_at) if m.created_at else datetime.utcnow()
+            await bot_cache.add_message(
+                chat.chat_id,
+                bot_cache.CachedMessage(
+                    avito_message_id=m.message_id, direction=m.direction, text=m.text,
+                    has_image=m.has_image, created_at=created_at, is_read=m.is_read,
+                ),
+            )
+    except avito_client.AvitoAPIError:
+        pass
+
+
 async def api_chat_detail(request: web.Request) -> web.Response:
     short_id = request.match_info["short_id"]
     chat = await bot_cache.resolve_chat(short_id)
     if chat is None:
         return web.json_response({"error": "not_found"}, status=404)
+    await _refresh_chat_from_avito(chat)
     return web.json_response(_serialize_chat(chat, with_messages=True))
 
 

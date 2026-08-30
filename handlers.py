@@ -429,6 +429,31 @@ async def show_leadership_menu(message: Message) -> None:
 # --- CRM: chat detail, reply, delete, reassign, profile rating -------------
 
 
+async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
+    """Live-syncs is_read/new messages from Avito for one chat. Background
+    polling (tasks.poll_account_loop) intentionally short-circuits chats it
+    already believes are fully read to save API calls — that's fine for the
+    ambient list, but a chat someone is actually about to look at deserves
+    the real current state, not whatever the last poll cycle happened to
+    see (e.g. a reply sent directly in the Avito app, not through this
+    bot, could take up to a poll interval to reflect otherwise)."""
+    client = avito_client.get_pool().get(chat.avito_account_id)
+    if client is None:
+        return
+    try:
+        for m in await client.get_messages(chat.chat_id):
+            created_at = utils.parse_utc(m.created_at) if m.created_at else datetime.utcnow()
+            await bot_cache.add_message(
+                chat.chat_id,
+                bot_cache.CachedMessage(
+                    avito_message_id=m.message_id, direction=m.direction, text=m.text,
+                    has_image=m.has_image, created_at=created_at, is_read=m.is_read,
+                ),
+            )
+    except avito_client.AvitoAPIError:
+        pass
+
+
 @crm_router.callback_query(F.data.startswith((f"{constants.PREFIX_CHAT}_", f"{constants.PREFIX_REPLY}_")))
 async def open_chat(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
@@ -437,6 +462,7 @@ async def open_chat(callback: CallbackQuery, state: FSMContext) -> None:
     if chat is None:
         await callback.message.answer("Чат не найден или устарел.")
         return
+    await _refresh_chat_from_avito(chat)
     await _render_chat_detail(callback.message, chat, state, callback.from_user.id)
 
 
@@ -461,20 +487,7 @@ async def cb_refresh(callback: CallbackQuery, state: FSMContext) -> None:
     chat = await bot_cache.resolve_chat(short_id)
     if chat is None:
         return
-    client = avito_client.get_pool().get(chat.avito_account_id)
-    if client is not None:
-        try:
-            for m in await client.get_messages(chat.chat_id):
-                created_at = utils.parse_utc(m.created_at) if m.created_at else datetime.utcnow()
-                await bot_cache.add_message(
-                    chat.chat_id,
-                    bot_cache.CachedMessage(
-                        avito_message_id=m.message_id, direction=m.direction, text=m.text,
-                        has_image=m.has_image, created_at=created_at, is_read=m.is_read,
-                    ),
-                )
-        except avito_client.AvitoAPIError:
-            pass
+    await _refresh_chat_from_avito(chat)
     await _render_chat_detail(callback.message, chat, state, callback.from_user.id)
 
 
