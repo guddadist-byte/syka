@@ -236,6 +236,19 @@ async def get_unread_for_points(point_ids: set[int] | None) -> list[CachedChat]:
     return result
 
 
+async def get_unread_chat_ids_for_account(avito_account_id: int) -> set[str]:
+    """Used by tasks.poll_account_loop to reconcile our locally-tracked
+    unread chats against Avito's own unread_only=true response — a chat
+    read directly in Avito's own app/site (not through this bot) never
+    triggers add_message/mark_read on our side, so without this check it
+    would sit "unread" here forever."""
+    async with _lock:
+        return {
+            c.chat_id for c in _chats.values()
+            if c.avito_account_id == avito_account_id and c.unread_count > 0
+        }
+
+
 async def get_recent_replies_for_points(point_ids: set[int] | None, within: timedelta) -> list[CachedChat]:
     cutoff = datetime.utcnow() - within
     async with _lock:
