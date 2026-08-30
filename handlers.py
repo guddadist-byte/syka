@@ -2029,7 +2029,7 @@ async def _show_all_orders(message: Message, actor_id: int) -> None:
             errors.append(f"{account.name}: {exc}")
             continue
         for order in orders:
-            point_id = await database.resolve_order_point_id(order)
+            point_id = await database.resolve_order_point_id(order, avito_account_id=account.id)
             if point_id in point_ids:
                 shown.append((order, account.id, account.name))
 
@@ -2064,7 +2064,7 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int) -
         return
 
     account = await database.get_avito_account(account_id)
-    point_id = await database.resolve_order_point_id(order)
+    point_id = await database.resolve_order_point_id(order, avito_account_id=account_id)
     point = await database.get_point(point_id) if point_id else None
 
     lines = []

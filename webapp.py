@@ -607,7 +607,7 @@ async def api_orders(request: web.Request) -> web.Response:
             errors.append(f"{account.name}: {exc}")
             continue
         for order in orders:
-            point_id = await database.resolve_order_point_id(order)
+            point_id = await database.resolve_order_point_id(order, avito_account_id=account.id)
             if point_id not in point_ids:
                 continue
             items = order.get("items") or []
@@ -639,7 +639,7 @@ async def api_order_detail(request: web.Request) -> web.Response:
         return web.json_response({"error": "not_found"}, status=404)
 
     account = await database.get_avito_account(account_id)
-    point_id = await database.resolve_order_point_id(order)
+    point_id = await database.resolve_order_point_id(order, avito_account_id=account_id)
     point = await database.get_point(point_id) if point_id else None
 
     delivery_info = order.get("delivery") or {}

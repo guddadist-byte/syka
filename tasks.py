@@ -351,14 +351,18 @@ async def _backup_loop(bot: Bot, db_path: str) -> None:
 
 
 async def _notify_new_order(bot: Bot, order: dict, account_id: int) -> None:
-    point_id = await database.resolve_order_point_id(order)
+    point_id = await database.resolve_order_point_id(order, avito_account_id=account_id)
     if point_id is None:
         # Same policy as chat notifications: no resolvable point -> stay
         # silent rather than guess-broadcast. Still visible on demand via
         # "📦 Заказы Avito".
         return
 
-    recipients = await database.list_point_subscribers(point_id, on_shift_only=True)
+    # Unlike chat notifications, deliberately NOT limited to on-shift
+    # staff: an order carries a shipping deadline and is announced exactly
+    # once (see _orders_poll_loop's seen-ids dedup), so one placed
+    # overnight or on a day off would otherwise reach nobody, ever.
+    recipients = await database.list_point_subscribers(point_id, on_shift_only=False)
     if not recipients:
         return
 
@@ -394,11 +398,23 @@ async def _orders_poll_loop(bot: Bot) -> None:
                 except avito_client.AvitoAPIError:
                     continue
                 seen_ids = await database.get_seen_order_ids(account.id)
+                # First pass ever for this account (fresh DB, or an account
+                # only just added): every currently-active order would look
+                # brand new and blast one notification each — with ~100
+                # active orders per account that's a flood, not news. Adopt
+                # them silently instead; genuinely new orders notify from
+                # the next pass on.
+                is_first_pass = not seen_ids
                 for order in orders:
                     order_id = order.get("id")
                     if order_id is None or str(order_id) in seen_ids:
                         continue
+                    # Marked before notifying on purpose: guarantees at
+                    # most one notification per order even if sending blows
+                    # up midway.
                     await database.mark_order_seen(str(order_id), account.id)
+                    if is_first_pass:
+                        continue
                     await _notify_new_order(bot, order, account.id)
         except Exception:
             logger.exception("_orders_poll_loop: failed")

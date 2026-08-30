@@ -567,13 +567,16 @@ async def list_point_subscribers(point_id: int, on_shift_only: bool = True) -> l
             (point_id, constants.STATUS_APPROVED),
         )
     else:
+        # Still approved-and-reachable only: "not filtering by shift" must
+        # never widen into notifying pending, blocked, or bot-blocking
+        # users — the shift flag is the only thing this branch relaxes.
         rows = await _fetchall(
             """
             SELECT u.* FROM users u
             JOIN subscriptions s ON s.user_id = u.telegram_id
-            WHERE s.point_id = ?
+            WHERE s.point_id = ? AND u.status = ? AND u.blocked_bot = 0
             """,
-            (point_id,),
+            (point_id, constants.STATUS_APPROVED),
         )
     return [models.User.from_row(r) for r in rows]
 
@@ -907,17 +910,49 @@ async def get_point_id_for_chat(chat_id: str) -> int | None:
     return row["point_id"] if row else None
 
 
-async def resolve_order_point_id(order: dict) -> int | None:
-    """Shared by tasks.py (push notifications) and handlers.py (the
-    on-demand "📦 Заказы Avito" screen) — lives here rather than in
-    either of those two so neither has to import the other."""
-    for item in order.get("items") or []:
+async def get_point_id_for_item(item_id: str) -> int | None:
+    """Read-only lookup of the sticky item→point routing already
+    established for chats (see resolve_point_for_item, which by contrast
+    also creates rows and does coordinate matching)."""
+    row = await _fetchone("SELECT point_id FROM avito_items WHERE item_id = ?", (item_id,))
+    return row["point_id"] if row else None
+
+
+async def resolve_order_point_id(order: dict, avito_account_id: int | None = None) -> int | None:
+    """Shared by tasks.py (push notifications) and handlers.py/webapp.py
+    (the on-demand "📦 Заказы Avito" screen) — lives here rather than in
+    any of those so none has to import the other.
+
+    Routing is attempted in descending order of specificity. Matching on
+    chatId alone is not enough: it only ever resolves when the buyer
+    happened to message about the listing, whereas an Avito Delivery order
+    is routinely placed without a single message — those used to resolve
+    to None and silently never notify anyone.
+    """
+    items = order.get("items") or []
+
+    for item in items:
         chat_id = item.get("chatId")
-        if not chat_id:
-            continue
-        point_id = await get_point_id_for_chat(chat_id)
-        if point_id is not None:
-            return point_id
+        if chat_id:
+            point_id = await get_point_id_for_chat(chat_id)
+            if point_id is not None:
+                return point_id
+
+    # No chat (or a chat we never routed) — fall back to the listing
+    # itself, using the same sticky item→point mapping chats rely on.
+    for item in items:
+        item_id = item.get("avitoId")
+        if item_id:
+            point_id = await get_point_id_for_item(str(item_id))
+            if point_id is not None:
+                return point_id
+
+    # Last resort: the cabinet's own default point, if one is set.
+    if avito_account_id is not None:
+        account = await get_avito_account(avito_account_id)
+        if account is not None and account.point_id is not None:
+            return account.point_id
+
     return None
 
 
