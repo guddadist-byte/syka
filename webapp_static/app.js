@@ -43,6 +43,16 @@ function apiPatch(path, body) { return api(path, { method: "PATCH", body: JSON.s
 function apiDelete(path) { return api(path, { method: "DELETE" }); }
 function apiUpload(path, formData) { return api(path, { method: "POST", body: formData }); }
 
+// A plain <img src="/api/..."> can't carry the auth header the backend
+// requires on every /api/ route — fetch the bytes ourselves (with the
+// header) and hand the <img> a blob: URL instead.
+async function apiBlobUrl(path) {
+  const resp = await fetch("/api" + path, { headers: { "X-Telegram-Init-Data": INIT_DATA } });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const blob = await resp.blob();
+  return URL.createObjectURL(blob);
+}
+
 // --- toast --------------------------------------------------------------
 
 let toastTimer = null;
@@ -537,7 +547,7 @@ async function renderOrderDetail(params) {
       actions.includes(name) ? `<button class="btn ${cls || ""} small" data-action="${name}">${label}</button>` : "";
 
     screenRoot.innerHTML = `
-      ${order.has_barcode ? `<img class="barcode-img" src="/api/orders/${params.accountId}/${params.orderId}/barcode.png" alt="barcode">` : ""}
+      ${order.has_barcode ? `<img class="barcode-img" id="barcodeImg" alt="barcode">` : ""}
       <div class="card">
         ${order.point_name ? `<div class="card-row"><span>Точка</span><span>${esc(order.point_name)}</span></div>` : ""}
         ${order.point_address ? `<div class="card-row"><span>Адрес</span><span>${esc(order.point_address)}</span></div>` : ""}
@@ -563,6 +573,12 @@ async function renderOrderDetail(params) {
 
     if (order.chat_short_id) {
       document.getElementById("orderChatBtn").addEventListener("click", () => go("chatDetail", { shortId: order.chat_short_id }));
+    }
+
+    if (order.has_barcode) {
+      apiBlobUrl(`/orders/${params.accountId}/${params.orderId}/barcode.png`)
+        .then(url => { const img = document.getElementById("barcodeImg"); if (img) img.src = url; })
+        .catch(() => { const img = document.getElementById("barcodeImg"); if (img) img.remove(); });
     }
 
     screenRoot.querySelectorAll("[data-action]").forEach(btn => {
