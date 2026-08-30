@@ -1505,8 +1505,23 @@ def create_app(bot_token: str, bot=None, db_path: str | None = None) -> web.Appl
 
     app.router.add_post("/api/admin/broadcast", api_admin_broadcast)
 
-    async def index(_request: web.Request) -> web.FileResponse:
-        return web.FileResponse(STATIC_DIR / "index.html")
+    async def index(_request: web.Request) -> web.Response:
+        # Telegram's in-app WebView caches static assets very aggressively
+        # by URL, independent of Cache-Control/ETag — a plain "git pull" of
+        # style.css/app.js was silently served stale on reopen. Bust it by
+        # appending a query string derived from the current file contents
+        # (recomputed on every request, not cached in-process, so it's
+        # correct even without an avito_bot restart after a deploy) and
+        # forbid caching index.html itself so the browser always re-reads
+        # this — and therefore the current — version string.
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        digest = hashlib.md5()
+        digest.update((STATIC_DIR / "style.css").read_bytes())
+        digest.update((STATIC_DIR / "app.js").read_bytes())
+        version = digest.hexdigest()[:10]
+        html = html.replace('href="style.css"', f'href="style.css?v={version}"')
+        html = html.replace('src="app.js"', f'src="app.js?v={version}"')
+        return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
 
     app.router.add_get("/", index)
     app.router.add_static("/", STATIC_DIR, show_index=False)
