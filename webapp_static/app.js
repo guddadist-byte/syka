@@ -1457,11 +1457,11 @@ async function renderAdminBroadcast() {
 // ============================================================================
 
 async function boot() {
-  const minSplash = new Promise(r => setTimeout(r, 900));
+  const minSplash = new Promise(r => setTimeout(r, 3200));
   await Promise.all([renderHome(), minSplash]);
   const splash = document.getElementById("splash");
   splash.classList.add("fade-out");
-  setTimeout(() => splash.remove(), 550);
+  setTimeout(() => splash.remove(), 700);
 }
 
 boot();

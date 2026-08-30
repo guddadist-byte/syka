@@ -1,17 +1,25 @@
 :root {
-  --bg-top: #2a0a10;
-  --bg-bottom: #120306;
-  --card-bg: rgba(255, 255, 255, 0.06);
-  --card-border: rgba(255, 255, 255, 0.09);
+  /* Moody grayscale base (photo-reference aesthetic — deep shadow, soft fog
+     highlight) replaces the old red/burgundy background; --accent stays red
+     as the single accent color so the app doesn't read as flat monochrome. */
+  --bg-top: #28282b;
+  --bg-mid: #18181b;
+  --bg-bottom: #09090a;
+  --card-bg: rgba(255, 255, 255, 0.05);
+  --card-border: rgba(255, 255, 255, 0.10);
   --accent: #e0304a;
   --accent-2: #ff5f6d;
   --accent-dark: #7a1522;
-  --text: #f5e9ea;
-  --text-dim: #c9a4a9;
+  --text: #efeeec;
+  --text-dim: #9b9b9e;
   --danger: #ff4d4d;
   --success: #3ecf7e;
   --radius: 999px;
   --radius-card: 22px;
+  /* Fine film-grain texture, generated inline (no external asset, no stock
+     photo) — layered with mix-blend-mode: overlay to give the flat
+     gradients below a photographic, non-flat quality. */
+  --grain: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
 * {
@@ -23,7 +31,16 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: radial-gradient(circle at 50% -10%, #4a1420 0%, var(--bg-top) 35%, var(--bg-bottom) 100%);
+  background-color: var(--bg-bottom);
+  background-image:
+    var(--grain),
+    radial-gradient(ellipse 680px 520px at 55% -10%, rgba(255, 255, 255, 0.10), transparent 62%),
+    radial-gradient(circle at 22% 78%, rgba(255, 255, 255, 0.04), transparent 55%),
+    linear-gradient(180deg, var(--bg-top) 0%, var(--bg-mid) 45%, var(--bg-bottom) 100%);
+  background-repeat: repeat, no-repeat, no-repeat, no-repeat;
+  background-size: 160px 160px, auto, auto, auto;
+  background-blend-mode: overlay, screen, screen, normal;
+  background-attachment: fixed, fixed, fixed, fixed;
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   overscroll-behavior-y: none;
@@ -47,9 +64,18 @@ html, body {
   align-items: center;
   justify-content: center;
   gap: 18px;
-  background: radial-gradient(circle at 50% 30%, #4a1420 0%, var(--bg-top) 45%, var(--bg-bottom) 100%);
+  background-color: var(--bg-bottom);
+  background-image:
+    var(--grain),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.028) 0px, rgba(255, 255, 255, 0.028) 1px, transparent 1px, transparent 7px),
+    radial-gradient(ellipse 620px 520px at 50% 6%, rgba(255, 255, 255, 0.14), transparent 60%),
+    radial-gradient(circle at 28% 82%, rgba(255, 255, 255, 0.05), transparent 55%),
+    linear-gradient(190deg, var(--bg-top) 0%, var(--bg-mid) 50%, var(--bg-bottom) 100%);
+  background-repeat: repeat, repeat, no-repeat, no-repeat, no-repeat;
+  background-size: 160px 160px, auto, auto, auto, auto;
+  background-blend-mode: overlay, overlay, screen, screen, normal;
   z-index: 100;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.6s ease;
 }
 
 #splash.fade-out { opacity: 0; pointer-events: none; }
@@ -60,7 +86,7 @@ html, body {
   object-fit: cover;
   border-radius: 28px;
   animation: splash-pop 900ms cubic-bezier(.2, .9, .3, 1.3) both, splash-float 3.2s ease-in-out 900ms infinite;
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 26px rgba(255, 90, 100, 0.45));
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 30px rgba(255, 255, 255, 0.30));
 }
 
 @keyframes splash-pop {
@@ -74,23 +100,53 @@ html, body {
 }
 
 .splash-title {
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
   color: var(--text);
 }
 
+.splash-divider {
+  width: 36px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  margin: -6px 0 2px;
+}
+
 .splash-by {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dim);
-  letter-spacing: 0.3px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.splash-progress {
+  width: 96px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.splash-progress span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent-dark), var(--accent-2));
+  animation: splash-progress-fill 3100ms cubic-bezier(.3, .1, .2, 1) both;
+}
+
+@keyframes splash-progress-fill {
+  0% { width: 0%; }
+  100% { width: 100%; }
 }
 
 .splash-claude {
   position: absolute;
   bottom: 28px;
   font-size: 11px;
-  color: rgba(201, 164, 169, 0.7);
+  color: rgba(155, 155, 158, 0.75);
   letter-spacing: 0.4px;
 }
 
@@ -409,7 +465,7 @@ html, body {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%) translateY(20px);
-  background: rgba(20, 4, 8, 0.95);
+  background: rgba(16, 16, 18, 0.95);
   border: 1px solid var(--card-border);
   color: var(--text);
   padding: 10px 18px;
