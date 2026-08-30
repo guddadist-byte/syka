@@ -81,6 +81,18 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
                 # worse failure than the staleness bug being fixed.
                 avito_unread_ids = {c.chat_id for c in chats}
                 locally_unread_ids = await bot_cache.get_unread_chat_ids_for_account(account.id)
+                # Temporary diagnostic: the whole reconciliation above rests
+                # on an unconfirmed assumption about Avito's real
+                # unread_only semantics (see the comment above) — this
+                # line exists purely to let us read, from prod logs,
+                # whether that assumption actually holds before writing
+                # any further fix. Remove once confirmed one way or the
+                # other.
+                logger.info(
+                    "unread-reconcile[%s]: avito_unread=%d local_unread=%d stale_candidates=%s",
+                    account.name, len(avito_unread_ids), len(locally_unread_ids),
+                    sorted(locally_unread_ids - avito_unread_ids)[:10],
+                )
                 for chat_id in locally_unread_ids:
                     if chat_id in avito_unread_ids:
                         unread_miss_streak.pop(chat_id, None)
