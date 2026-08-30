@@ -303,27 +303,29 @@ async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
     """Mirrors handlers.py's _refresh_chat_from_avito — kept as a separate
     copy rather than a shared import since webapp.py and handlers.py are
     deliberately independent of each other (see the project's import
-    graph). Live-syncs is_read/new messages from Avito for one chat, since
-    background polling short-circuits chats it already believes are fully
-    read to save API calls — fine for the ambient list, but a chat someone
-    is actually opening deserves the real current state (e.g. a reply sent
-    directly in the Avito app, not through the bot/mini-app, could take up
-    to a poll interval to otherwise be reflected here)."""
+    graph). Live-syncs is_read from Avito for messages this chat already
+    knows about, since background polling short-circuits chats it already
+    believes are fully read to save API calls — fine for the ambient list,
+    but a chat someone is actually opening deserves the real current state.
+
+    Deliberately uses bot_cache.sync_is_read(), NOT add_message(): this
+    path has no durable known_ids/database.append_message() pairing of its
+    own (that lives in tasks._process_chat), so it must never be the thing
+    that first discovers a brand-new message — doing so previously made
+    such a message "known" only in memory, invisible to the DB, and it
+    would resurface as a false "new" message and re-notify after the next
+    restart. A genuinely new message is picked up by the next poll cycle
+    (seconds away) exactly as before."""
     client = avito_client.get_pool().get(chat.avito_account_id)
     if client is None:
         return
     try:
-        for m in await client.get_messages(chat.chat_id):
-            created_at = utils.parse_utc(m.created_at) if m.created_at else datetime.utcnow()
-            await bot_cache.add_message(
-                chat.chat_id,
-                bot_cache.CachedMessage(
-                    avito_message_id=m.message_id, direction=m.direction, text=m.text,
-                    has_image=m.has_image, created_at=created_at, is_read=m.is_read,
-                ),
-            )
+        messages = await client.get_messages(chat.chat_id)
     except avito_client.AvitoAPIError:
-        pass
+        return
+    for m in messages:
+        if m.message_id is not None:
+            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read)
 
 
 async def api_chat_detail(request: web.Request) -> web.Response:

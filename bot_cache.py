@@ -230,6 +230,34 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
         return True
 
 
+async def sync_is_read(chat_id: str, avito_message_id: str, is_read: bool) -> None:
+    """Reconciles is_read for an ALREADY-known message only — unlike
+    add_message(), never appends a message bot_cache hasn't seen before.
+
+    This is what the "open a chat" / "🔄 Обновить" live-refresh path
+    (handlers.py/webapp.py) must use instead of add_message(): those
+    callers have no durable known_ids/database.append_message() pairing of
+    their own (that pairing lives in tasks._process_chat, see add_message's
+    docstring). Calling add_message() directly from there let a message
+    become "known" in bot_cache — and therefore permanently skipped by
+    _process_chat's `is_new` check — without ever being persisted to the
+    messages table. Bot_cache is in-memory only, so the next restart
+    forgets it while the DB (and known_ids) still doesn't have it either;
+    _process_chat then sees it as genuinely new and re-notifies about an
+    old, already-answered chat — this was the "шлёт все отвеченные заново"
+    regression."""
+    async with _lock:
+        chat = _chats.get(chat_id)
+        if chat is None:
+            return
+        for existing in chat.messages:
+            if existing.avito_message_id == avito_message_id:
+                if existing.is_read != is_read:
+                    existing.is_read = is_read
+                    chat.unread_count = _real_unread_count(chat.messages)
+                return
+
+
 async def mark_read(chat_id: str) -> None:
     async with _lock:
         chat = _chats.get(chat_id)
