@@ -136,7 +136,17 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
             )
             if initial_messages:
                 chat.messages.extend(initial_messages)
-                chat.last_message_at = chat.messages[-1].created_at
+                # Deliberately NOT setting chat.last_message_at here: these
+                # messages' is_read defaults to True (the messages table
+                # doesn't persist Avito's real flag), so unread_count below
+                # is 0 until a live poll confirms otherwise. If
+                # last_message_at were set too, _process_chat's
+                # short-circuit ("nothing new since last_message_at and
+                # already 0 unread") would see it as already up to date and
+                # skip the one get_messages() call that could ever correct
+                # that default — leaving it None forces exactly one real
+                # poll per chat after a restart (add_message sets a real,
+                # confirmed value once that happens).
                 chat.unread_count = _real_unread_count(chat.messages)
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
@@ -194,6 +204,13 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
                     if existing.is_read != message.is_read:
                         existing.is_read = message.is_read
                         chat.unread_count = _real_unread_count(chat.messages)
+                    # Also true (not just when is_read changed): this is
+                    # what actually confirms, with real Avito data, that
+                    # this chat's state is current as of this message's
+                    # timestamp — needed so upsert_chat's post-restart
+                    # None stops forcing a re-fetch every single cycle
+                    # once the first real one has happened.
+                    chat.last_message_at = max(chat.last_message_at or message.created_at, message.created_at)
                     return False
         chat.messages.append(message)
         if len(chat.messages) > 1 and chat.messages[-2].created_at > message.created_at:
