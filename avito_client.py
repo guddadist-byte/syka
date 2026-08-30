@@ -305,11 +305,17 @@ class AvitoClient:
                     link = content["link"]
                     text = f"🔗 {link.get('text') or link.get('url') or 'Ссылка'}"
             # is_read: Avito's own read-receipt truth for this message ("was
-            # it read by the account making this request") — confirmed to
-            # exist in the official v3 messages schema. Default True if
-            # somehow absent so a missing field can never manufacture a
-            # false "unread" (only an explicit False counts as unread).
-            is_read = raw.get("is_read")
+            # it read by the account making this request"). The official
+            # Swagger spec's prose calls this field "is_read", but a live
+            # dump of a real v3 response showed the actual JSON key is
+            # camelCase "isRead" (schema text and wire format disagreed) —
+            # confirmed by hand against a real chat before this fix, not
+            # guessed. Checking "is_read" too costs nothing and guards
+            # against Avito ever actually returning the documented casing.
+            # Default True if the key is missing under both names so a
+            # missing field can never manufacture a false "unread" (only an
+            # explicit False counts as unread).
+            is_read = raw.get("isRead", raw.get("is_read"))
             messages.append(
                 models.AvitoMessage(
                     message_id=raw["id"],
