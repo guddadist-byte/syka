@@ -325,11 +325,13 @@ class AvitoClient:
             created = raw.get("created")
             text = content.get("text", "")
             if not text:
-                # Non-text content types (confirmed in Avito's docs: voice,
-                # missed call, shared link) leave "text" empty — without a
-                # placeholder here, every one of these renders and previews
-                # as "(фото)" downstream, which is simply wrong for
-                # anything that isn't actually an image.
+                # Non-text content types (voice, missed call, shared link).
+                # A message that matches none of these renders as an empty
+                # bubble, which is how it was discovered that these key
+                # names don't all match the real API: a voice message came
+                # through blank and was announced as "(фото)". The log line
+                # below turns any further mismatch into something visible
+                # in the journal instead of another round of screenshots.
                 if "voice" in content:
                     text = "🎤 Голосовое сообщение"
                 elif "call" in content:
@@ -337,6 +339,14 @@ class AvitoClient:
                 elif "link" in content:
                     link = content["link"]
                     text = f"🔗 {link.get('text') or link.get('url') or 'Ссылка'}"
+                elif image_url:
+                    text = ""  # rendered as the picture itself
+                elif content:
+                    logger.info(
+                        "get_messages: unrecognised content type, keys=%s sample=%.200s",
+                        sorted(content), json.dumps(content, ensure_ascii=False),
+                    )
+                    text = "📎 Вложение"
             # is_read: Avito's own read-receipt truth for this message ("was
             # it read by the account making this request"). The official
             # Swagger spec's prose calls this field "is_read", but a live
@@ -354,7 +364,10 @@ class AvitoClient:
                     message_id=raw["id"],
                     direction="in" if raw.get("direction") == "in" else "out",
                     text=text,
-                    has_image="image" in content,
+                    # Derived from an actually-extracted URL rather than a
+                    # separate "is there an image key" guess, so has_image
+                    # can never be True while the picture is unreachable.
+                    has_image=image_url is not None,
                     image_url=image_url,
                     created_at=(utils.utcnow_str() if created is None
                                 else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),

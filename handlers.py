@@ -100,7 +100,9 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
             # photos every time the chat is opened.
             text = f'🖼 <a href="{html.escape(m.image_url)}">Фото</a>'
         else:
-            text = "(фото)"
+            # Never claim "фото" for anything text-less — that's how voice
+            # messages ended up labelled as photos.
+            text = "📷 Фото" if m.has_image else "📎 Вложение"
         lines.append(f"{speaker}: {text}")
     if not chat.messages:
         lines.append("(сообщений пока нет)")
@@ -498,7 +500,7 @@ async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
         return
     for m in messages:
         if m.message_id is not None:
-            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read)
+            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read, image_url=m.image_url)
 
 
 @crm_router.callback_query(F.data.startswith((f"{constants.PREFIX_CHAT}_", f"{constants.PREFIX_REPLY}_")))

@@ -326,7 +326,7 @@ async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
         return
     for m in messages:
         if m.message_id is not None:
-            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read)
+            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read, image_url=m.image_url)
 
 
 async def api_chat_detail(request: web.Request) -> web.Response:

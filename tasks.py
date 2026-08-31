@@ -196,6 +196,10 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         is_new = await bot_cache.add_message(chat.chat_id, cached_message)
 
         if message.message_id is not None and message.message_id in known_ids:
+            if message.image_url:
+                # Backfill only — messages persisted before the image_url
+                # column existed never pass the append_message() below.
+                await database.set_message_image_url(message.message_id, message.image_url)
             # Already persisted before a restart — bot_cache is in-memory
             # and resets on every restart, so without this DB-backed check
             # every message in Avito's recent history would look "new"
@@ -263,7 +267,17 @@ async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: b
     short_id = await bot_cache.get_short_id(chat_id)
     client_name = html.escape(cached_chat.client_name or "клиент")
     last_message = messages[-1]
-    preview = html.escape(last_message.text[:200]) if last_message.text else "(фото)"
+    # Not "(фото)": this fallback fires for ANY text-less message, so a
+    # voice message used to be announced as a photo. Only claim a type the
+    # parser actually identified (see avito_client.get_messages, which
+    # already labels voice/call/link and leaves text empty only for a real
+    # picture).
+    if last_message.text:
+        preview = html.escape(last_message.text[:200])
+    elif last_message.image_url or last_message.has_image:
+        preview = "📷 Фото"
+    else:
+        preview = "📎 Вложение"
     if cached_chat.item_title and cached_chat.item_url:
         item_line = f'📦 <a href="{html.escape(cached_chat.item_url)}">{html.escape(cached_chat.item_title)}</a>'
     elif cached_chat.item_title:

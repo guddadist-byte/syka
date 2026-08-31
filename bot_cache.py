@@ -205,6 +205,13 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
                     if existing.is_read != message.is_read:
                         existing.is_read = message.is_read
                         chat.unread_count = _real_unread_count(chat.messages)
+                    # Fill in an attachment we couldn't resolve before (a
+                    # message cached before image_url existed, or hydrated
+                    # from a DB row predating the column). Only fills a
+                    # blank — never overwrites a URL we already have.
+                    if message.image_url and not existing.image_url:
+                        existing.image_url = message.image_url
+                        existing.has_image = True
                     # Also true (not just when is_read changed): this is
                     # what actually confirms, with real Avito data, that
                     # this chat's state is current as of this message's
@@ -231,7 +238,8 @@ async def add_message(chat_id: str, message: CachedMessage) -> bool:
         return True
 
 
-async def sync_is_read(chat_id: str, avito_message_id: str, is_read: bool) -> None:
+async def sync_is_read(chat_id: str, avito_message_id: str, is_read: bool,
+                        image_url: str | None = None) -> None:
     """Reconciles is_read for an ALREADY-known message only — unlike
     add_message(), never appends a message bot_cache hasn't seen before.
 
@@ -256,6 +264,9 @@ async def sync_is_read(chat_id: str, avito_message_id: str, is_read: bool) -> No
                 if existing.is_read != is_read:
                     existing.is_read = is_read
                     chat.unread_count = _real_unread_count(chat.messages)
+                if image_url and not existing.image_url:
+                    existing.image_url = image_url
+                    existing.has_image = True
                 return
 
 

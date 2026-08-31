@@ -894,6 +894,19 @@ async def append_message(chat_id: str, direction: str, text: str | None, has_ima
     )
 
 
+async def set_message_image_url(avito_message_id: str, image_url: str) -> None:
+    """Backfills a URL onto an already-persisted message.
+
+    image_url is otherwise only written by append_message(), which
+    _process_chat skips for anything already in known_ids — so every
+    message that predates the column would stay blank forever. Fills only
+    when still empty, so this can never overwrite a good value."""
+    await _execute(
+        "UPDATE messages SET image_url = ? WHERE avito_message_id = ? AND image_url IS NULL",
+        (image_url, avito_message_id),
+    )
+
+
 async def get_known_message_ids(chat_id: str) -> set[str]:
     """Durable dedup set — survives process restarts, unlike bot_cache."""
     rows = await _fetchall(

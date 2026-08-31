@@ -295,7 +295,11 @@ async function renderChatDetail(params) {
           const photo = m.image_url
             ? `<img class="msg-photo" src="${escAttr(m.image_url)}" alt="Фото" loading="lazy">`
             : (m.has_image ? "📷 Фото" : "");
-          const body = esc(m.text);
+          // A bubble with neither text nor a picture is an attachment type
+          // the parser didn't recognise — say so rather than rendering an
+          // empty bubble (that blankness is what hid unparsed voice
+          // messages until now).
+          const body = esc(m.text) || (photo ? "" : "📎 Вложение");
           return `<div class="msg ${m.direction}">${photo}${photo && body ? "<br>" : ""}${body}</div>`;
         }).join("")}
       </div>
