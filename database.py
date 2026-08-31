@@ -800,17 +800,17 @@ async def list_all_chats() -> list[models.ChatSummary]:
 async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int | None = None,
                                item_id: str | None = None, client_name: str | None = None,
                                last_message_at: str | None = None, last_message_text: str | None = None,
-                               last_message_dir: str | None = None) -> None:
+                               last_message_dir: str | None = None, item_url: str | None = None) -> None:
     existing = await get_chat_summary(chat_id)
     if existing is None:
         await _execute(
             """
             INSERT INTO chats (chat_id, avito_account_id, point_id, item_id, client_name,
-                                last_message_at, last_message_text, last_message_dir)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                last_message_at, last_message_text, last_message_dir, item_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (chat_id, avito_account_id, point_id, item_id, client_name,
-             last_message_at, last_message_text, last_message_dir),
+             last_message_at, last_message_text, last_message_dir, item_url),
         )
         return
     await _execute(
@@ -822,10 +822,12 @@ async def upsert_chat_summary(chat_id: str, avito_account_id: int, point_id: int
             last_message_at = COALESCE(?, last_message_at),
             last_message_text = COALESCE(?, last_message_text),
             last_message_dir = COALESCE(?, last_message_dir),
+            item_url = COALESCE(?, item_url),
             updated_at = datetime('now')
         WHERE chat_id = ?
         """,
-        (point_id, item_id, client_name, last_message_at, last_message_text, last_message_dir, chat_id),
+        (point_id, item_id, client_name, last_message_at, last_message_text, last_message_dir,
+         item_url, chat_id),
     )
 
 
@@ -967,6 +969,39 @@ async def resolve_order_point_id(order: dict, avito_account_id: int | None = Non
         account = await get_avito_account(avito_account_id)
         if account is not None and account.point_id is not None:
             return account.point_id
+
+    return None
+
+
+async def resolve_order_item_url(order: dict) -> str | None:
+    """The listing URL for an order's item, so the order card can link to it.
+
+    Only ever returns a URL Avito itself gave us (chats carry item.url, see
+    avito_client.get_chats) — never one assembled from the item id, since
+    that format isn't confirmed and a dead link is worse than plain text.
+    Same descending-specificity shape as resolve_order_point_id above.
+    """
+    for item in order.get("items") or []:
+        url = item.get("url")
+        if url:
+            return url
+
+    for item in order.get("items") or []:
+        chat_id = item.get("chatId")
+        if chat_id:
+            row = await _fetchone("SELECT item_url FROM chats WHERE chat_id = ?", (chat_id,))
+            if row and row["item_url"]:
+                return row["item_url"]
+
+    for item in order.get("items") or []:
+        item_id = item.get("avitoId")
+        if item_id:
+            row = await _fetchone(
+                "SELECT item_url FROM chats WHERE item_id = ? AND item_url IS NOT NULL LIMIT 1",
+                (str(item_id),),
+            )
+            if row and row["item_url"]:
+                return row["item_url"]
 
     return None
 

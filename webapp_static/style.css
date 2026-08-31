@@ -374,6 +374,11 @@ html, body {
   line-height: 1.35;
 }
 
+.item-link {
+  color: var(--accent-2);
+  text-decoration: underline;
+}
+
 .msg-photo {
   display: block;
   max-width: 100%;

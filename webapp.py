@@ -704,6 +704,7 @@ async def api_order_detail(request: web.Request) -> web.Response:
         "point_address": point.address if point else None,
         "track_number": track_number,
         "items": [i.get("title") for i in items],
+        "item_url": await database.resolve_order_item_url(order),
         "status": status,
         "status_label": constants.ORDER_STATUS_LABELS.get(status, status),
         "total": prices.get("total"),

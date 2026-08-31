@@ -194,6 +194,9 @@ class ChatSummary:
     last_replied_at: str | None
     updated_at: str
     read_at: str | None = None
+    # Trails the required fields (and defaults) so _row() still builds a
+    # ChatSummary from any row predating migration 011.
+    item_url: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "ChatSummary":

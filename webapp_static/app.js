@@ -4,8 +4,11 @@ const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : 
 if (tg) {
   tg.ready();
   tg.expand();
-  try { tg.setHeaderColor("#2a0a10"); } catch (e) {}
-  try { tg.setBackgroundColor("#120306"); } catch (e) {}
+  // Kept in step with --bg-top / --bg-bottom in style.css; these were left
+  // on the old burgundy values by the restyle, so Telegram's own header
+  // didn't match the app underneath it.
+  try { tg.setHeaderColor("#28282b"); } catch (e) {}
+  try { tg.setBackgroundColor("#09090a"); } catch (e) {}
 }
 
 const INIT_DATA = tg ? tg.initData : "";
@@ -575,7 +578,11 @@ async function renderOrderDetail(params) {
         <div class="card-row"><span>Кабинет</span><span>${esc(order.account_name)}</span></div>
         <div class="card-row"><span>Номер заказа</span><span>${esc(order.id)}</span></div>
         ${order.track_number ? `<div class="card-row"><span>Трек-номер</span><span>${esc(order.track_number)}</span></div>` : ""}
-        <div class="card-row"><span>Товар</span><span>${esc((order.items || []).join(", "))}</span></div>
+        <div class="card-row"><span>Товар</span><span>${
+          order.item_url
+            ? `<a href="#" id="orderItemLink" class="item-link">${esc((order.items || []).join(", "))}</a>`
+            : esc((order.items || []).join(", "))
+        }</span></div>
         ${order.total != null ? `<div class="card-row"><span>Сумма</span><span>${esc(order.total)}</span></div>` : ""}
         ${order.commission != null ? `<div class="card-row"><span>Комиссия</span><span>${esc(order.commission)}</span></div>` : ""}
         ${order.delivery_service ? `<div class="card-row"><span>Служба доставки</span><span>${esc(order.delivery_service)}</span></div>` : ""}
@@ -594,6 +601,16 @@ async function renderOrderDetail(params) {
 
     if (order.chat_short_id) {
       document.getElementById("orderChatBtn").addEventListener("click", () => go("chatDetail", { shortId: order.chat_short_id }));
+    }
+
+    if (order.item_url) {
+      // A plain <a target="_blank"> does nothing inside Telegram's WebView —
+      // opening an external page is what tg.openLink is for.
+      document.getElementById("orderItemLink").addEventListener("click", (e) => {
+        e.preventDefault();
+        if (tg && tg.openLink) tg.openLink(order.item_url);
+        else window.open(order.item_url, "_blank");
+      });
     }
 
     if (order.has_barcode) {

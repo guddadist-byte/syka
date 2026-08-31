@@ -151,7 +151,7 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     await database.set_chat_unread_count(chat.chat_id, cached.unread_count)
     await database.upsert_chat_summary(
         chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
-        client_name=chat.client_name,
+        client_name=chat.client_name, item_url=chat.item_url,
     )
 
     incoming_last = utils.parse_utc(chat.last_message_at) if chat.last_message_at else None

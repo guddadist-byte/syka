@@ -2136,7 +2136,11 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int) -
 
     items = order.get("items") or []
     titles = ", ".join(html.escape(item.get("title", "")) for item in items) or "(без названия)"
-    lines.append(f"📦 Товар: {titles}")
+    item_url = await database.resolve_order_item_url(order)
+    if item_url:
+        lines.append(f'📦 Товар: <a href="{html.escape(item_url)}">{titles}</a>')
+    else:
+        lines.append(f"📦 Товар: {titles}")
 
     status = order.get("status", "")
     lines.append(f"Статус: {constants.ORDER_STATUS_LABELS.get(status, status)}")
