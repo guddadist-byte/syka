@@ -191,6 +191,7 @@ def _serialize_message(m: bot_cache.CachedMessage) -> dict:
         "direction": m.direction,
         "text": m.text,
         "has_image": m.has_image,
+        "image_url": m.image_url,
         "created_at": m.created_at.isoformat(),
     }
 
@@ -551,28 +552,70 @@ async def _apply_point_placeholders(text: str) -> str:
 # --- routes: my own point templates (📋 Мои шаблоны, manager role) --------
 
 
+async def _resolve_template_point(user: models.User, requested_point_id) -> tuple[int | None, web.Response | None]:
+    """Which point may this caller manage templates for.
+
+    A 'manager' owns exactly one point (responsible_point_id) and may only
+    touch that one. Admins and directors have no responsible_point_id at
+    all — that field is only ever set when granting the manager role — so
+    gating templates on it alone locked the very people who set templates
+    up out of the feature entirely (empty list, and 400 on create). They
+    pick a point explicitly instead.
+    """
+    if requested_point_id is None:
+        if user.responsible_point_id:
+            return user.responsible_point_id, None
+        if _has_role_at_least(user, constants.ADMIN):
+            return None, web.json_response({"error": "point_required"}, status=400)
+        return None, web.json_response({"error": "no_responsible_point"}, status=400)
+
+    try:
+        point_id = int(requested_point_id)
+    except (TypeError, ValueError):
+        return None, web.json_response({"error": "bad_point_id"}, status=400)
+
+    if _has_role_at_least(user, constants.ADMIN):
+        point = await database.get_point(point_id)
+        if point is None:
+            return None, web.json_response({"error": "point_not_found"}, status=404)
+        return point_id, None
+
+    if user.responsible_point_id and point_id == user.responsible_point_id:
+        return point_id, None
+    return None, web.json_response({"error": "forbidden"}, status=403)
+
+
 async def api_templates_mine(request: web.Request) -> web.Response:
     user: models.User = request["user"]
-    if not user.responsible_point_id:
-        return web.json_response({"templates": []})
-    templates = await database.list_templates(user.responsible_point_id)
-    return web.json_response({"templates": [_serialize_template(t) for t in templates]})
+    requested = request.query.get("point_id")
+    if requested is None and not user.responsible_point_id:
+        # Admin/director with no point chosen yet: nothing to show, but not
+        # an error — the client renders its point picker first.
+        return web.json_response({"templates": [], "point_id": None})
+    point_id, error = await _resolve_template_point(user, requested)
+    if error is not None:
+        return error
+    templates = await database.list_templates(point_id)
+    return web.json_response(
+        {"templates": [_serialize_template(t) for t in templates], "point_id": point_id}
+    )
 
 
 async def api_templates_mine_create(request: web.Request) -> web.Response:
     user: models.User = request["user"]
     if not _has_role_at_least(user, constants.MANAGER):
         return web.json_response({"error": "forbidden"}, status=403)
-    if not user.responsible_point_id:
-        return web.json_response({"error": "no_responsible_point"}, status=400)
     body = await request.json()
+    point_id, error = await _resolve_template_point(user, body.get("point_id"))
+    if error is not None:
+        return error
     kind = body.get("kind") if body.get("kind") in (constants.TEMPLATE_TEXT, constants.TEMPLATE_AI_PROMPT) else constants.TEMPLATE_TEXT
     title = (body.get("title") or "").strip() or "Шаблон"
     text = (body.get("body") or "").strip()
     if not text:
         return web.json_response({"error": "empty_body"}, status=400)
     template = await database.create_template(
-        point_id=user.responsible_point_id, kind=kind, title=title, body=text, created_by=user.telegram_id
+        point_id=point_id, kind=kind, title=title, body=text, created_by=user.telegram_id
     )
     return web.json_response(_serialize_template(template))
 

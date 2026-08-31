@@ -33,6 +33,7 @@ class CachedMessage:
     has_image: bool
     created_at: datetime
     is_read: bool = True
+    image_url: str | None = None
 
 
 @dataclass

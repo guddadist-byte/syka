@@ -92,7 +92,15 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
     lines.append("")
     for m in list(chat.messages)[-30:]:
         speaker = f"👤 <b>{client_name}</b>" if m.direction == "in" else "🧑‍💼 <b>Я</b>"
-        text = html.escape(m.text) if m.text else "(фото)"
+        if m.text:
+            text = html.escape(m.text)
+        elif m.image_url:
+            # Tappable rather than sent as a photo message: the dialog stays
+            # one compact message instead of turning into a stream of
+            # photos every time the chat is opened.
+            text = f'🖼 <a href="{html.escape(m.image_url)}">Фото</a>'
+        else:
+            text = "(фото)"
         lines.append(f"{speaker}: {text}")
     if not chat.messages:
         lines.append("(сообщений пока нет)")
@@ -382,15 +390,50 @@ async def cb_my_point_toggle(callback: CallbackQuery) -> None:
     )
 
 
+async def _template_point_for_user(user, state: FSMContext) -> int | None:
+    """Which point's templates this user manages.
+
+    A manager owns exactly one point. Admins and directors never have a
+    responsible_point_id (it's only set when granting the manager role),
+    so they pick a point once and it's remembered in FSM data for the rest
+    of the session — otherwise the whole templates section is unusable for
+    exactly the people who set templates up.
+    """
+    if user.responsible_point_id:
+        return user.responsible_point_id
+    if constants.ROLE_ORDER.get(user.role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
+        return (await state.get_data()).get("tpl_point_id")
+    return None
+
+
+async def _render_my_templates(target: Message, point_id: int) -> None:
+    templates = await database.list_templates(point_id)
+    point = await database.get_point(point_id)
+    header = f"📋 Шаблоны точки «{point.name}»" if point else "📋 Шаблоны"
+    text = f"{header} (нажмите, чтобы посмотреть/удалить):" if templates else f"{header}: пока пусто."
+    await target.answer(text, reply_markup=keyboards.template_manage_kb(templates))
+
+
 @menu_router.message(F.text == constants.BTN_MY_TEMPLATES, StateFilter("*"), RoleAtLeast(constants.MANAGER))
-async def show_my_templates(message: Message) -> None:
+async def show_my_templates(message: Message, state: FSMContext) -> None:
     user = await database.get_user(message.from_user.id)
-    if not user or not user.responsible_point_id:
+    if not user:
+        return
+    point_id = await _template_point_for_user(user, state)
+    if point_id is None:
+        if constants.ROLE_ORDER.get(user.role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
+            points = await database.list_points()
+            if not points:
+                await message.answer("Точек пока нет.")
+                return
+            await message.answer(
+                "Выберите точку, шаблонами которой хотите управлять:",
+                reply_markup=keyboards.point_multiselect_kb(points, set(), "tplpoint", "x"),
+            )
+            return
         await message.answer("У вас пока не назначена ответственная точка.")
         return
-    templates = await database.list_templates(user.responsible_point_id)
-    text = "📋 Ваши шаблоны (нажмите, чтобы посмотреть/удалить):" if templates else "📋 Шаблонов пока нет."
-    await message.answer(text, reply_markup=keyboards.template_manage_kb(templates))
+    await _render_my_templates(message, point_id)
 
 
 @template_router.callback_query(F.data.startswith("tplmanage_"), RoleAtLeast(constants.MANAGER))
@@ -798,12 +841,13 @@ async def template_title(message: Message, state: FSMContext) -> None:
 async def template_body(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     user = await database.get_user(message.from_user.id)
-    if not user or not user.responsible_point_id:
+    point_id = await _template_point_for_user(user, state) if user else None
+    if point_id is None:
         await state.clear()
         await message.answer("У вас не назначена точка.")
         return
     await database.create_template(
-        point_id=user.responsible_point_id, kind=data.get("new_template_kind", constants.TEMPLATE_TEXT),
+        point_id=point_id, kind=data.get("new_template_kind", constants.TEMPLATE_TEXT),
         title=data.get("new_template_title", "Шаблон"), body=message.text, created_by=message.from_user.id,
     )
     await state.clear()
@@ -1098,7 +1142,7 @@ async def cb_block_with_refund(callback: CallbackQuery) -> None:
 
 
 @admin_router.callback_query(F.data.startswith(f"{constants.PREFIX_POINT}_"))
-async def cb_point_action(callback: CallbackQuery) -> None:
+async def cb_point_action(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     _, payload = callback.data.split("_", 1)
     parts = payload.split(":")
@@ -1140,6 +1184,11 @@ async def cb_point_action(callback: CallbackQuery) -> None:
             await database.reassign_item_point(chat.item_id, point_id, callback.from_user.id)
             chat.point_id = point_id
             await callback.message.answer("✅ Точка переназначена.")
+    elif mode == "tplpoint":
+        # Admin/director picked which point's templates to manage — see
+        # _template_point_for_user.
+        await state.update_data(tpl_point_id=point_id)
+        await _render_my_templates(callback.message, point_id)
 
 
 # --- admin: broadcasts --------------------------------------------------

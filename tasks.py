@@ -90,6 +90,7 @@ async def _build_initial_messages(chat_id: str) -> list[bot_cache.CachedMessage]
                 direction=m.direction,
                 text=m.text or "",
                 has_image=bool(m.has_image),
+                image_url=m.image_url,
                 created_at=utils.parse_utc(m.sent_at),
             )
         )
@@ -188,6 +189,7 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             direction=message.direction,
             text=message.text,
             has_image=message.has_image,
+            image_url=message.image_url,
             created_at=created_at,
             is_read=message.is_read,
         )
@@ -210,6 +212,7 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         await database.append_message(
             chat.chat_id, message.direction, message.text, message.has_image,
             sent_at=sent_at_str, avito_message_id=message.message_id,
+            image_url=message.image_url,
         )
 
         if message.direction != "in":

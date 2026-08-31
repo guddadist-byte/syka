@@ -102,6 +102,14 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// esc() goes through textContent, which leaves quotes intact — fine inside
+// an element, unsafe inside an attribute value. Use this one there.
+function escAttr(s) {
+  return (s == null ? "" : String(s)).replace(/[&<>"']/g, c => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
+}
+
 function loading() {
   screenRoot.innerHTML = '<div class="spinner"></div>';
 }
@@ -280,7 +288,16 @@ async function renderChatDetail(params) {
           </div>
         </div>` : ""}
       <div class="messages" id="msgList">
-        ${chat.messages.map(m => `<div class="msg ${m.direction}">${esc(m.text) || (m.has_image ? "📷 Фото" : "")}</div>`).join("")}
+        ${chat.messages.map(m => {
+          // A photo the client sent renders as the picture itself; the
+          // "📷 Фото" placeholder is only for images whose URL Avito
+          // didn't give us.
+          const photo = m.image_url
+            ? `<img class="msg-photo" src="${escAttr(m.image_url)}" alt="Фото" loading="lazy">`
+            : (m.has_image ? "📷 Фото" : "");
+          const body = esc(m.text);
+          return `<div class="msg ${m.direction}">${photo}${photo && body ? "<br>" : ""}${body}</div>`;
+        }).join("")}
       </div>
       <div id="sentBanner"></div>
       <div class="chat-actions">
@@ -703,8 +720,32 @@ async function renderMyTemplates() {
   setHeader("Мои шаблоны", "", true);
   loading();
   try {
-    const data = await apiGet("/templates/mine");
+    // A manager owns exactly one point and the server picks it. Admins and
+    // directors have no point of their own, so they choose which point's
+    // templates they're editing — without this they got an empty list and
+    // an error on every create.
+    const needsPointPicker = !!(state.me && state.me.is_admin);
+    const qs = state.templatePointId ? `?point_id=${state.templatePointId}` : "";
+    const data = await apiGet("/templates/mine" + qs);
+    if (data.point_id) state.templatePointId = data.point_id;
+
+    let pointBar = "";
+    if (needsPointPicker) {
+      const label = state.templatePointName
+        ? esc(state.templatePointName)
+        : (state.templatePointId ? `#${state.templatePointId}` : "не выбрана");
+      pointBar = `
+        <div class="card card-row">
+          <span>🏢 Точка: <b>${label}</b></span>
+          <button class="btn secondary small" id="tplPickPoint">Выбрать</button>
+        </div>
+        <div id="tplPointPicker"></div>`;
+    }
+
+    const canCreate = !needsPointPicker || !!state.templatePointId;
     screenRoot.innerHTML = `
+      ${pointBar}
+      ${canCreate ? `
       <div class="card field">
         <label>Тип</label>
         <select id="newTplKind" style="border-radius:14px;border:1px solid var(--card-border);background:rgba(255,255,255,0.06);color:var(--text);padding:11px 13px;font-size:14px">
@@ -716,7 +757,7 @@ async function renderMyTemplates() {
         <label>Текст / промпт</label>
         <input type="text" id="newTplBody" placeholder="!КОДВ — часы, !КОДА — адрес">
         <button class="btn block" id="newTplSubmit">➕ Создать шаблон</button>
-      </div>
+      </div>` : '<div class="empty-state">Выберите точку, чтобы добавить шаблон</div>'}
       <div class="section-title">Существующие</div>
       ${data.templates.length ? data.templates.map(t => `
         <div class="card card-row">
@@ -725,17 +766,35 @@ async function renderMyTemplates() {
         </div>
       `).join("") : '<div class="empty-state">Шаблонов пока нет</div>'}
     `;
+
+    if (needsPointPicker) {
+      document.getElementById("tplPickPoint").addEventListener("click", async () => {
+        try {
+          const pts = (await apiGet("/points")).points || [];
+          if (!pts.length) { toast("Точек нет"); return; }
+          const chosen = await pickPointInline(pts, document.getElementById("tplPointPicker"));
+          if (chosen == null) return;
+          state.templatePointId = chosen;
+          const hit = pts.find(p => p.id === chosen);
+          state.templatePointName = hit ? hit.name : null;
+          renderMyTemplates();
+        } catch (err) { toast("Ошибка: " + err.message); }
+      });
+    }
+
+    if (canCreate) {
     document.getElementById("newTplSubmit").addEventListener("click", async () => {
       const kind = document.getElementById("newTplKind").value;
       const title = document.getElementById("newTplTitle").value.trim();
       const body = document.getElementById("newTplBody").value.trim();
       if (!body) { toast("Введите текст шаблона"); return; }
       try {
-        await apiPost("/templates/mine", { kind, title, body });
+        await apiPost("/templates/mine", { kind, title, body, point_id: state.templatePointId || undefined });
         toast("✅ Создано");
         renderMyTemplates();
       } catch (err) { toast("Ошибка: " + err.message); }
     });
+    }
     screenRoot.querySelectorAll("[data-del]").forEach(btn => {
       btn.addEventListener("click", async () => {
         try {

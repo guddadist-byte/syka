@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -111,6 +112,37 @@ async def fetch_account_info(client_id: str, client_secret: str, session: aiohtt
             text = await resp.text()
             raise AvitoAPIError(f"accounts/self failed: {resp.status}: {text}")
         return await resp.json()
+
+
+def _extract_image_url(content: dict) -> str | None:
+    """Pulls the best available image URL out of a message's content.
+
+    Deliberately tolerant about the shape. Avito's documented form is
+    {"image": {"sizes": {"140x105": url, "1280x960": url}}}, but this
+    project has already been burned once by the live response disagreeing
+    with the documentation (the read flag ships as "isRead", not the
+    documented "is_read"), so a bare URL string and a flat size->url dict
+    are accepted too. Picks the largest size by pixel count so the photo
+    is worth looking at rather than a thumbnail.
+    """
+    image = content.get("image")
+    if not image:
+        return None
+    if isinstance(image, str):
+        return image
+    if not isinstance(image, dict):
+        return None
+
+    sizes = image.get("sizes") if isinstance(image.get("sizes"), dict) else image
+    best_url, best_pixels = None, -1
+    for key, value in sizes.items():
+        if not isinstance(value, str) or not value.startswith("http"):
+            continue
+        match = re.match(r"(\d+)\s*x\s*(\d+)", str(key))
+        pixels = int(match.group(1)) * int(match.group(2)) if match else 0
+        if pixels > best_pixels:
+            best_url, best_pixels = value, pixels
+    return best_url
 
 
 class AvitoClient:
@@ -289,6 +321,7 @@ class AvitoClient:
         messages = []
         for raw in raw_messages:
             content = raw.get("content") or {}
+            image_url = _extract_image_url(content)
             created = raw.get("created")
             text = content.get("text", "")
             if not text:
@@ -322,6 +355,7 @@ class AvitoClient:
                     direction="in" if raw.get("direction") == "in" else "out",
                     text=text,
                     has_image="image" in content,
+                    image_url=image_url,
                     created_at=(utils.utcnow_str() if created is None
                                 else utils.from_unix(created).strftime("%Y-%m-%d %H:%M:%S")),
                     is_read=True if is_read is None else bool(is_read),

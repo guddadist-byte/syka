@@ -882,13 +882,15 @@ async def get_unread_chats(point_ids: set[int] | None) -> list[models.ChatSummar
 
 
 async def append_message(chat_id: str, direction: str, text: str | None, has_image: bool, sent_at: str,
-                          avito_message_id: str | None = None, message_uuid: str | None = None) -> None:
+                          avito_message_id: str | None = None, message_uuid: str | None = None,
+                          image_url: str | None = None) -> None:
     await _execute(
         """
-        INSERT INTO messages (chat_id, avito_message_id, message_uuid, direction, text, has_image, sent_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (chat_id, avito_message_id, message_uuid, direction, text, has_image, image_url, sent_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (chat_id, avito_message_id, message_uuid, direction, text, 1 if has_image else 0, sent_at),
+        (chat_id, avito_message_id, message_uuid, direction, text,
+         1 if has_image else 0, image_url, sent_at),
     )
 
 

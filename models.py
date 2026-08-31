@@ -211,6 +211,9 @@ class Message:
     has_image: int
     sent_at: str
     created_at: str
+    # Trails the required fields (and defaults) so _row() still builds a
+    # Message from any row predating migration 010.
+    image_url: str | None = None
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Message":
@@ -245,4 +248,5 @@ class AvitoMessage:
     has_image: bool
     created_at: str
     is_read: bool = True
+    image_url: str | None = None
 

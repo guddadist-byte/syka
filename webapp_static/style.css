@@ -374,6 +374,13 @@ html, body {
   line-height: 1.35;
 }
 
+.msg-photo {
+  display: block;
+  max-width: 100%;
+  border-radius: 12px;
+  margin: 2px 0;
+}
+
 .msg.in {
   align-self: flex-start;
   background: rgba(255, 255, 255, 0.08);
