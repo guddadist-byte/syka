@@ -136,6 +136,18 @@ def _require_admin(request: web.Request) -> models.User | None:
     return None
 
 
+def _require_director(request: web.Request) -> web.Response | None:
+    """Mirrors settings_router's gate in handlers.py — the system-settings
+    routes (Avito/AI keys, proxy credentials, payment, points, backups) are
+    the owner's alone. Hiding the buttons in app.js is not enough on its
+    own: without this the routes stay reachable to any РОП who calls them
+    directly."""
+    user: models.User = request["user"]
+    if not _has_role_at_least(user, constants.DIRECTOR):
+        return web.json_response({"error": "forbidden"}, status=403)
+    return None
+
+
 def _label(user: models.User) -> str:
     return user.full_name or user.username or str(user.telegram_id)
 
@@ -226,6 +238,7 @@ async def api_me(request: web.Request) -> web.Response:
         "on_shift": bool(user.on_shift),
         "rating_points": user.rating_points,
         "is_admin": _has_role_at_least(user, constants.ADMIN),
+        "is_director": _has_role_at_least(user, constants.DIRECTOR),
         "is_manager_or_above": _has_role_at_least(user, constants.MANAGER),
         "points": [{"id": p.id, "name": p.name} for p in points],
     })
@@ -1009,14 +1022,14 @@ async def api_admin_request_reject(request: web.Request) -> web.Response:
 
 
 async def api_admin_points(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     points = await database.list_points(active_only=False)
     return web.json_response({"points": [_serialize_point(p) for p in points]})
 
 
 async def api_admin_point_update(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     point_id = int(request.match_info["point_id"])
     body = await request.json()
@@ -1032,7 +1045,7 @@ async def api_admin_point_update(request: web.Request) -> web.Response:
 
 
 async def api_admin_point_toggle(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     point_id = int(request.match_info["point_id"])
     point = await database.get_point(point_id)
@@ -1046,7 +1059,7 @@ async def api_admin_point_toggle(request: web.Request) -> web.Response:
 
 
 async def api_admin_points_bulk_import(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     text = body.get("text") or ""
@@ -1091,7 +1104,7 @@ async def api_admin_points_bulk_import(request: web.Request) -> web.Response:
 
 
 async def api_admin_points_sync(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     accounts = await database.list_avito_accounts(active_only=True)
     seen_coords = 0
@@ -1134,7 +1147,7 @@ async def api_admin_points_sync(request: web.Request) -> web.Response:
 
 
 async def api_admin_points_conflicts(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     points = await database.list_points(active_only=False)
     all_coords: list[tuple[int, str, float, float]] = []
@@ -1196,14 +1209,14 @@ async def api_admin_points_reassign(request: web.Request) -> web.Response:
 
 
 async def api_admin_avito_accounts(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     accounts = await database.list_avito_accounts(active_only=False)
     return web.json_response({"accounts": [_serialize_avito_account(a) for a in accounts]})
 
 
 async def api_admin_avito_account_create(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     name = (body.get("name") or "").strip()
@@ -1228,7 +1241,7 @@ async def api_admin_avito_account_create(request: web.Request) -> web.Response:
 
 
 async def api_admin_avito_account_toggle(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     account_id = int(request.match_info["account_id"])
     account = await database.get_avito_account(account_id)
@@ -1243,7 +1256,7 @@ async def api_admin_avito_account_toggle(request: web.Request) -> web.Response:
 
 
 async def api_admin_ai_config_get(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     cfg = await database.get_ai_config()
     return web.json_response({
@@ -1255,7 +1268,7 @@ async def api_admin_ai_config_get(request: web.Request) -> web.Response:
 
 async def api_admin_ai_config_patch(request: web.Request) -> web.Response:
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     fields = {}
@@ -1270,7 +1283,7 @@ async def api_admin_ai_config_patch(request: web.Request) -> web.Response:
 
 
 async def api_admin_proxy_config_get(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     cfg = await database.get_proxy_config()
     return web.json_response({"is_enabled": bool(cfg.is_enabled), "proxy_url": cfg.proxy_url})
@@ -1282,7 +1295,7 @@ async def api_admin_proxy_config_patch(request: web.Request) -> web.Response:
     configured with the new proxy. We respond first, then force the exit
     on a short delay so the HTTP response actually reaches the browser."""
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     fields = {}
@@ -1303,7 +1316,7 @@ async def api_admin_proxy_config_patch(request: web.Request) -> web.Response:
 
 
 async def api_admin_payment_config_get(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     cfg = await database.get_payment_config()
     return web.json_response({"is_enabled": bool(cfg.is_enabled), "amount_stars": cfg.amount_stars})
@@ -1311,7 +1324,7 @@ async def api_admin_payment_config_get(request: web.Request) -> web.Response:
 
 async def api_admin_payment_config_patch(request: web.Request) -> web.Response:
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     fields = {}
@@ -1328,14 +1341,14 @@ async def api_admin_payment_config_patch(request: web.Request) -> web.Response:
 
 
 async def api_admin_welcome_get(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     return web.json_response({"text": await database.get_welcome_message()})
 
 
 async def api_admin_welcome_patch(request: web.Request) -> web.Response:
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     text = (body.get("text") or "").strip()
@@ -1346,7 +1359,7 @@ async def api_admin_welcome_patch(request: web.Request) -> web.Response:
 
 
 async def api_admin_backup_config_get(request: web.Request) -> web.Response:
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     cfg = await database.get_backup_config()
     return web.json_response({
@@ -1357,7 +1370,7 @@ async def api_admin_backup_config_get(request: web.Request) -> web.Response:
 
 async def api_admin_backup_config_patch(request: web.Request) -> web.Response:
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     body = await request.json()
     fields = {}
@@ -1375,7 +1388,7 @@ async def api_admin_backup_config_patch(request: web.Request) -> web.Response:
 
 async def api_admin_backup_run(request: web.Request) -> web.Response:
     actor: models.User = request["user"]
-    if (resp := _require_admin(request)) is not None:
+    if (resp := _require_director(request)) is not None:
         return resp
     bot = request.app.get("bot")
     db_path = request.app.get("db_path")

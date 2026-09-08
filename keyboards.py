@@ -43,7 +43,12 @@ def main_menu_kb(on_shift: bool, role: str) -> ReplyKeyboardMarkup:
     if role == constants.MANAGER:
         builder.row(KeyboardButton(text=constants.BTN_MY_TEMPLATES))
     if constants.ROLE_ORDER.get(role, 0) >= constants.ROLE_ORDER[constants.ADMIN]:
-        builder.row(KeyboardButton(text=constants.BTN_LEADERSHIP), KeyboardButton(text=constants.BTN_ADMIN_PANEL))
+        builder.row(KeyboardButton(text=constants.BTN_LEADERSHIP))
+    # System settings (Avito/AI keys, proxy credentials, payment, DB backups)
+    # are the owner's, not the РОП's — see settings_router in handlers.py,
+    # which enforces the same boundary server-side.
+    if role == constants.DIRECTOR:
+        builder.row(KeyboardButton(text=constants.BTN_ADMIN_PANEL))
     if _webapp_url:
         builder.row(KeyboardButton(text="📱 Открыть приложение", web_app=WebAppInfo(url=_webapp_url)))
     return builder.as_markup(resize_keyboard=True)

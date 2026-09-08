@@ -64,6 +64,7 @@ async def main() -> None:
         dp.include_router(ai_handlers.ai_router)
         dp.include_router(handlers.template_router)
         dp.include_router(handlers.admin_router)
+        dp.include_router(handlers.settings_router)
 
         avito_session = aiohttp.ClientSession()
         web_runner: web.AppRunner | None = None

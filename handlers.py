@@ -52,6 +52,12 @@ registration_router = Router(name="registration")
 crm_router = Router(name="crm")
 template_router = Router(name="template")
 admin_router = Router(name="admin")
+# System settings live behind their own router so the director-only gate is a
+# single choke point. There are ~20 handlers here (Avito keys, the AI key,
+# proxy credentials, payment, backups — backup_now alone ships the whole DB
+# file); a per-handler filter would only need to be forgotten once to leave a
+# silent hole, whereas this cannot be bypassed by adding a handler.
+settings_router = Router(name="settings")
 
 crm_router.message.filter(ApprovedUser())
 crm_router.callback_query.filter(ApprovedUser())
@@ -59,6 +65,8 @@ template_router.message.filter(ApprovedUser())
 template_router.callback_query.filter(ApprovedUser())
 admin_router.message.filter(RoleAtLeast(constants.ADMIN))
 admin_router.callback_query.filter(RoleAtLeast(constants.ADMIN))
+settings_router.message.filter(RoleAtLeast(constants.DIRECTOR))
+settings_router.callback_query.filter(RoleAtLeast(constants.DIRECTOR))
 
 
 # --- shared helpers ----------------------------------------------------------
@@ -461,7 +469,7 @@ async def cb_template_delete(callback: CallbackQuery) -> None:
     await callback.message.edit_text("🗑 Шаблон удалён.")
 
 
-@menu_router.message(F.text == constants.BTN_ADMIN_PANEL, StateFilter("*"), RoleAtLeast(constants.ADMIN))
+@menu_router.message(F.text == constants.BTN_ADMIN_PANEL, StateFilter("*"), RoleAtLeast(constants.DIRECTOR))
 async def show_admin_panel(message: Message) -> None:
     await message.answer("⚙️ Настройки", reply_markup=keyboards.admin_panel_kb())
 
@@ -1285,7 +1293,7 @@ async def cb_admin_onshift(callback: CallbackQuery) -> None:
     await callback.message.answer("\n".join(lines))
 
 
-@admin_router.callback_query(F.data == "adm_pointsmenu")
+@settings_router.callback_query(F.data == "adm_pointsmenu")
 async def cb_admin_points_menu(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer("🏢 Точки:", reply_markup=keyboards.admin_points_menu_kb())
@@ -1297,7 +1305,7 @@ async def cb_admin_account_menu(callback: CallbackQuery) -> None:
     await callback.message.answer("👤 Управление аккаунтом по ID:", reply_markup=keyboards.admin_account_menu_kb())
 
 
-@admin_router.callback_query(F.data == "adm_points")
+@settings_router.callback_query(F.data == "adm_points")
 async def cb_admin_points(callback: CallbackQuery) -> None:
     await callback.answer()
     points = await database.list_points(active_only=False)
@@ -1309,7 +1317,7 @@ async def cb_admin_points(callback: CallbackQuery) -> None:
     await callback.message.answer("🏢 Подразделения:", reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data == "adm_pointconflicts")
+@settings_router.callback_query(F.data == "adm_pointconflicts")
 async def cb_admin_point_conflicts(callback: CallbackQuery) -> None:
     await callback.answer("Проверяю…")
     points = await database.list_points(active_only=False)
@@ -1418,7 +1426,7 @@ async def cb_admin_point_rename_start(callback: CallbackQuery, state: FSMContext
     await callback.message.answer("Введите новое название точки:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_point_name, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_point_name, SafeFreeText())
 async def admin_point_rename_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     point_id = data.get("editing_point_id")
@@ -1437,7 +1445,7 @@ async def cb_admin_point_address_start(callback: CallbackQuery, state: FSMContex
     await callback.message.answer("Введите новый адрес точки:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_point_address, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_point_address, SafeFreeText())
 async def admin_point_address_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     point_id = data.get("editing_point_id")
@@ -1456,7 +1464,7 @@ async def cb_admin_point_hours_start(callback: CallbackQuery, state: FSMContext)
     await callback.message.answer("Введите часы работы точки (например, 10:00–20:00):", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_point_hours, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_point_hours, SafeFreeText())
 async def admin_point_hours_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     point_id = data.get("editing_point_id")
@@ -1479,7 +1487,7 @@ async def cb_admin_point_code_start(callback: CallbackQuery, state: FSMContext) 
     )
 
 
-@admin_router.message(AdminStates.waiting_for_point_code, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_point_code, SafeFreeText())
 async def admin_point_code_finish(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     point_id = data.get("editing_point_id")
@@ -1489,7 +1497,7 @@ async def admin_point_code_finish(message: Message, state: FSMContext) -> None:
     await message.answer("✅ Код точки обновлён.")
 
 
-@admin_router.callback_query(F.data == "adm_bulkpoints")
+@settings_router.callback_query(F.data == "adm_bulkpoints")
 async def cb_admin_bulk_points_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_bulk_points_import)
@@ -1504,7 +1512,7 @@ async def cb_admin_bulk_points_start(callback: CallbackQuery, state: FSMContext)
     )
 
 
-@admin_router.message(AdminStates.waiting_for_bulk_points_import, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_bulk_points_import, SafeFreeText())
 async def admin_bulk_points_finish(message: Message, state: FSMContext) -> None:
     await state.clear()
     all_points = await database.list_points(active_only=False)
@@ -1554,7 +1562,7 @@ async def admin_bulk_points_finish(message: Message, state: FSMContext) -> None:
     await message.answer("\n".join(lines))
 
 
-@admin_router.callback_query(F.data == "adm_syncpoints")
+@settings_router.callback_query(F.data == "adm_syncpoints")
 async def cb_admin_sync_points(callback: CallbackQuery) -> None:
     await callback.answer("Синк запущен…")
     accounts = await database.list_avito_accounts(active_only=True)
@@ -1617,7 +1625,7 @@ async def cb_admin_unassigned(callback: CallbackQuery) -> None:
 # --- admin: Avito accounts ------------------------------------------------
 
 
-@admin_router.callback_query(F.data == "adm_avito")
+@settings_router.callback_query(F.data == "adm_avito")
 async def cb_admin_avito(callback: CallbackQuery) -> None:
     await callback.answer()
     accounts = await database.list_avito_accounts(active_only=False)
@@ -1629,7 +1637,7 @@ async def cb_admin_avito(callback: CallbackQuery) -> None:
     await callback.message.answer("🔑 Avito-аккаунты:", reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data.startswith("adm_avitoedit_"))
+@settings_router.callback_query(F.data.startswith("adm_avitoedit_"))
 async def cb_admin_avito_edit(callback: CallbackQuery) -> None:
     await callback.answer()
     account_id = int(callback.data.rsplit("_", 1)[1])
@@ -1646,7 +1654,7 @@ async def cb_admin_avito_edit(callback: CallbackQuery) -> None:
     await callback.message.answer(text, reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data.startswith("adm_avitotoggle_"))
+@settings_router.callback_query(F.data.startswith("adm_avitotoggle_"))
 async def cb_admin_avito_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     account_id = int(callback.data.rsplit("_", 1)[1])
@@ -1658,28 +1666,28 @@ async def cb_admin_avito_toggle(callback: CallbackQuery) -> None:
     await callback.message.answer("Готово.")
 
 
-@admin_router.callback_query(F.data == "adm_avitoadd")
+@settings_router.callback_query(F.data == "adm_avitoadd")
 async def cb_admin_avito_add_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_avito_name)
     await callback.message.answer("Введите название аккаунта (для себя):", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_avito_name, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_avito_name, SafeFreeText())
 async def admin_avito_name(message: Message, state: FSMContext) -> None:
     await state.update_data(avito_name=message.text.strip())
     await state.set_state(AdminStates.waiting_for_avito_client_id)
     await message.answer("Введите client_id (из кабинета Avito, раздел «Интеграции и API»):")
 
 
-@admin_router.message(AdminStates.waiting_for_avito_client_id, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_avito_client_id, SafeFreeText())
 async def admin_avito_client_id(message: Message, state: FSMContext) -> None:
     await state.update_data(avito_client_id=message.text.strip())
     await state.set_state(AdminStates.waiting_for_avito_client_secret)
     await message.answer("Введите client_secret:")
 
 
-@admin_router.message(AdminStates.waiting_for_avito_client_secret, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_avito_client_secret, SafeFreeText())
 async def admin_avito_client_secret(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     client_id = data["avito_client_id"]
@@ -1712,7 +1720,7 @@ async def admin_avito_client_secret(message: Message, state: FSMContext) -> None
 # --- admin: AI settings ----------------------------------------------------
 
 
-@admin_router.callback_query(F.data == "adm_ai")
+@settings_router.callback_query(F.data == "adm_ai")
 async def cb_admin_ai(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_ai_config()
@@ -1730,7 +1738,7 @@ async def cb_admin_ai(callback: CallbackQuery) -> None:
     await callback.message.answer("\n".join(lines), reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data == "adm_aitoggle")
+@settings_router.callback_query(F.data == "adm_aitoggle")
 async def cb_admin_ai_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_ai_config()
@@ -1738,42 +1746,42 @@ async def cb_admin_ai_toggle(callback: CallbackQuery) -> None:
     await callback.message.answer("Готово.")
 
 
-@admin_router.callback_query(F.data == "adm_aiseturl")
+@settings_router.callback_query(F.data == "adm_aiseturl")
 async def cb_admin_ai_set_url(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_ai_base_url)
     await callback.message.answer("Введите base_url:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_ai_base_url, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_ai_base_url, SafeFreeText())
 async def admin_ai_base_url(message: Message, state: FSMContext) -> None:
     await database.update_ai_config(actor_id=message.from_user.id, base_url=message.text.strip())
     await state.clear()
     await message.answer("✅ Сохранено.")
 
 
-@admin_router.callback_query(F.data == "adm_aisetmodel")
+@settings_router.callback_query(F.data == "adm_aisetmodel")
 async def cb_admin_ai_set_model(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_ai_model)
     await callback.message.answer("Введите название модели:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_ai_model, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_ai_model, SafeFreeText())
 async def admin_ai_model(message: Message, state: FSMContext) -> None:
     await database.update_ai_config(actor_id=message.from_user.id, model=message.text.strip())
     await state.clear()
     await message.answer("✅ Сохранено.")
 
 
-@admin_router.callback_query(F.data == "adm_aisetkey")
+@settings_router.callback_query(F.data == "adm_aisetkey")
 async def cb_admin_ai_set_key(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_ai_api_key)
     await callback.message.answer("Введите API-ключ:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_ai_api_key, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_ai_api_key, SafeFreeText())
 async def admin_ai_api_key(message: Message, state: FSMContext) -> None:
     await database.update_ai_config(actor_id=message.from_user.id, api_key=message.text.strip())
     await state.clear()
@@ -1787,7 +1795,7 @@ async def admin_ai_api_key(message: Message, state: FSMContext) -> None:
 # --- admin: proxy settings (saving always restarts the process, see plan) --
 
 
-@admin_router.callback_query(F.data == "adm_proxy")
+@settings_router.callback_query(F.data == "adm_proxy")
 async def cb_admin_proxy(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_proxy_config()
@@ -1798,7 +1806,7 @@ async def cb_admin_proxy(callback: CallbackQuery) -> None:
     await callback.message.answer("\n".join(lines), reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data == "adm_proxytoggle")
+@settings_router.callback_query(F.data == "adm_proxytoggle")
 async def cb_admin_proxy_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_proxy_config()
@@ -1806,14 +1814,14 @@ async def cb_admin_proxy_toggle(callback: CallbackQuery) -> None:
     await _restart_for_proxy_change(callback.message)
 
 
-@admin_router.callback_query(F.data == "adm_proxyseturl")
+@settings_router.callback_query(F.data == "adm_proxyseturl")
 async def cb_admin_proxy_set_url(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_proxy_url)
     await callback.message.answer("Введите URL прокси (http://... или socks5://...):", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_proxy_url, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_proxy_url, SafeFreeText())
 async def admin_proxy_url(message: Message, state: FSMContext) -> None:
     await database.update_proxy_config(actor_id=message.from_user.id, proxy_url=message.text.strip(), is_enabled=1)
     await state.clear()
@@ -1823,7 +1831,7 @@ async def admin_proxy_url(message: Message, state: FSMContext) -> None:
 # --- admin: paid access settings -------------------------------------------
 
 
-@admin_router.callback_query(F.data == "adm_payment")
+@settings_router.callback_query(F.data == "adm_payment")
 async def cb_admin_payment(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_payment_config()
@@ -1836,7 +1844,7 @@ async def cb_admin_payment(callback: CallbackQuery) -> None:
     )
 
 
-@admin_router.callback_query(F.data == "adm_paymenttoggle")
+@settings_router.callback_query(F.data == "adm_paymenttoggle")
 async def cb_admin_payment_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_payment_config()
@@ -1844,14 +1852,14 @@ async def cb_admin_payment_toggle(callback: CallbackQuery) -> None:
     await callback.message.answer("Готово.")
 
 
-@admin_router.callback_query(F.data == "adm_paymentamount")
+@settings_router.callback_query(F.data == "adm_paymentamount")
 async def cb_admin_payment_amount_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_payment_amount)
     await callback.message.answer("Введите сумму в звёздах:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_payment_amount, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_payment_amount, SafeFreeText())
 async def admin_payment_amount(message: Message, state: FSMContext) -> None:
     try:
         amount = int(message.text.strip())
@@ -1866,7 +1874,7 @@ async def admin_payment_amount(message: Message, state: FSMContext) -> None:
 # --- admin: welcome message --------------------------------------------
 
 
-@admin_router.callback_query(F.data == "adm_welcome")
+@settings_router.callback_query(F.data == "adm_welcome")
 async def cb_admin_welcome(callback: CallbackQuery) -> None:
     await callback.answer()
     text = await database.get_welcome_message()
@@ -1876,20 +1884,20 @@ async def cb_admin_welcome(callback: CallbackQuery) -> None:
     await callback.message.answer(f"✉️ Текущий текст:\n\n{text}", reply_markup=builder.as_markup())
 
 
-@admin_router.callback_query(F.data == "adm_welcomepreview")
+@settings_router.callback_query(F.data == "adm_welcomepreview")
 async def cb_admin_welcome_preview(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.answer(await database.get_welcome_message())
 
 
-@admin_router.callback_query(F.data == "adm_welcomeset")
+@settings_router.callback_query(F.data == "adm_welcomeset")
 async def cb_admin_welcome_set(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_welcome_text)
     await callback.message.answer("Введите новый текст приветствия:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_welcome_text, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_welcome_text, SafeFreeText())
 async def admin_welcome_text(message: Message, state: FSMContext) -> None:
     await database.update_welcome_message(message.text, message.from_user.id)
     await state.clear()
@@ -1899,7 +1907,7 @@ async def admin_welcome_text(message: Message, state: FSMContext) -> None:
 # --- admin: backups --------------------------------------------------------
 
 
-@admin_router.callback_query(F.data == "adm_backup")
+@settings_router.callback_query(F.data == "adm_backup")
 async def cb_admin_backup(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_backup_config()
@@ -1908,7 +1916,7 @@ async def cb_admin_backup(callback: CallbackQuery) -> None:
     await callback.message.answer(text, reply_markup=keyboards.backup_settings_kb(bool(cfg.is_enabled)))
 
 
-@admin_router.callback_query(F.data == "adm_backuptoggle")
+@settings_router.callback_query(F.data == "adm_backuptoggle")
 async def cb_admin_backup_toggle(callback: CallbackQuery) -> None:
     await callback.answer()
     cfg = await database.get_backup_config()
@@ -1916,14 +1924,14 @@ async def cb_admin_backup_toggle(callback: CallbackQuery) -> None:
     await callback.message.answer("Готово.")
 
 
-@admin_router.callback_query(F.data == "adm_backupinterval")
+@settings_router.callback_query(F.data == "adm_backupinterval")
 async def cb_admin_backup_interval_start(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     await state.set_state(AdminStates.waiting_for_backup_interval)
     await callback.message.answer("Введите периодичность в часах:", reply_markup=keyboards.cancel_kb())
 
 
-@admin_router.message(AdminStates.waiting_for_backup_interval, SafeFreeText())
+@settings_router.message(AdminStates.waiting_for_backup_interval, SafeFreeText())
 async def admin_backup_interval(message: Message, state: FSMContext) -> None:
     try:
         hours = int(message.text.strip())
@@ -1935,7 +1943,7 @@ async def admin_backup_interval(message: Message, state: FSMContext) -> None:
     await message.answer("✅ Сохранено.")
 
 
-@admin_router.callback_query(F.data == "adm_backupnow")
+@settings_router.callback_query(F.data == "adm_backupnow")
 async def cb_admin_backup_now(callback: CallbackQuery) -> None:
     await callback.answer("Бэкап запускается…")
     static_cfg = config.load_static_config()

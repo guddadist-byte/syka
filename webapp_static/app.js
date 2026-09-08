@@ -836,20 +836,27 @@ async function renderMyTemplates() {
 SCREENS.adminHome = renderAdminHome;
 async function renderAdminHome() {
   setHeader("Админ-панель", "", true);
+  // Leadership work (РОП and up) vs. system settings (director only). The
+  // server enforces the same split — see _require_director in webapp.py;
+  // this list only decides what's worth showing.
   const sections = [
     ["adminUsers", "👥", "Все пользователи"],
     ["adminOnshift", "🕐", "Кто на смене"],
     ["adminRequests", "📋", "Заявки на вступление"],
-    ["adminPoints", "🏢", "Точки"],
-    ["adminAvito", "🔑", "Avito API"],
-    ["adminAI", "🧠", "Настройки ИИ"],
-    ["adminProxy", "🌐", "Прокси"],
-    ["adminPayment", "⭐", "Платный доступ"],
-    ["adminWelcome", "✉️", "Приветственное сообщение"],
-    ["adminBackup", "💾", "Резервные копии"],
     ["adminReviews", "⭐", "Отзывы Avito"],
     ["adminBroadcast", "📢", "Сообщение всем"],
   ];
+  if (state.me && state.me.is_director) {
+    sections.push(
+      ["adminPoints", "🏢", "Точки"],
+      ["adminAvito", "🔑", "Avito API"],
+      ["adminAI", "🧠", "Настройки ИИ"],
+      ["adminProxy", "🌐", "Прокси"],
+      ["adminPayment", "⭐", "Платный доступ"],
+      ["adminWelcome", "✉️", "Приветственное сообщение"],
+      ["adminBackup", "💾", "Резервные копии"],
+    );
+  }
   screenRoot.innerHTML = sections.map(([screen, icon, label]) =>
     `<button class="list-btn" data-go="${screen}"><span class="name">${icon} ${label}</span></button>`
   ).join("");
