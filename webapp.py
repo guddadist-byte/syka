@@ -657,7 +657,7 @@ async def api_orders(request: web.Request) -> web.Response:
         if client is None:
             continue
         try:
-            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
+            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=True)
         except avito_client.AvitoAPIError as exc:
             logger.exception("api_orders: failed for account %s", account.id)
             errors.append(f"{account.name}: {exc}")
@@ -687,7 +687,7 @@ async def api_order_detail(request: web.Request) -> web.Response:
     if client is None:
         return web.json_response({"error": "avito_unavailable"}, status=503)
     try:
-        orders = await client.get_orders()
+        orders = await client.get_orders(use_cache=True)
     except avito_client.AvitoAPIError as exc:
         return web.json_response({"error": "avito_rejected", "detail": str(exc)}, status=502)
     order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
@@ -748,7 +748,7 @@ async def api_order_barcode(request: web.Request) -> web.Response:
         if client is None:
             return web.Response(status=404)
         try:
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
         except avito_client.AvitoAPIError:
             return web.Response(status=502)
         order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
@@ -775,7 +775,7 @@ async def api_order_action(request: web.Request) -> web.Response:
         if action in ("confirm", "reject"):
             await client.apply_order_transition(order_id, action)
         elif action == "setMarkings":
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
             order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
             item_id = (order.get("items") or [{}])[0].get("avitoId") if order else None
             if item_id is None:
@@ -783,7 +783,7 @@ async def api_order_action(request: web.Request) -> web.Response:
             markings = [c.strip() for c in (body.get("markings") or "").split(",") if c.strip()]
             await client.set_order_markings(item_id, order_id, markings)
         elif action == "setCNCDetails":
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
             order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
             marketplace_id = order.get("marketplaceId") if order else None
             if marketplace_id is None:
@@ -794,7 +794,7 @@ async def api_order_action(request: web.Request) -> web.Response:
                 address=body.get("address"), details=None if comment in ("", "-") else comment,
             )
         elif action == "checkConfirmationCode":
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
             order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
             parcel_id = (order.get("delivery") or {}).get("dispatchNumber") if order else None
             if parcel_id is None:

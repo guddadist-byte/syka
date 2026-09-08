@@ -36,6 +36,7 @@ from constants import (
     AVITO_MIN_REQUEST_INTERVAL_SECONDS,
     INFLIGHT_SHUTDOWN_TIMEOUT_SECONDS,
     ORDER_MAX_PAGES,
+    ORDERS_CACHE_TTL_SECONDS,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,9 @@ class AvitoClient:
         self.client_secret = account.client_secret
         self._session = session
         self._last_request_at = 0.0
+        # (statuses, limit) -> (fetched_at_monotonic, orders). Only ever
+        # read by get_orders(use_cache=True); see ORDERS_CACHE_TTL_SECONDS.
+        self._orders_cache: dict[tuple[tuple[str, ...] | None, int], tuple[float, list[dict]]] = {}
 
     async def _ensure_token(self) -> str:
         account = await database.get_avito_account(self.account_id)
@@ -453,7 +457,36 @@ class AvitoClient:
     # --- Avito Delivery order management (pvz / cnc only, per the account's
     # actual usage — see order status/action labels in constants.py) -------
 
-    async def get_orders(self, statuses: list[str] | None = None, limit: int = 20) -> list[dict]:
+    def invalidate_orders_cache(self) -> None:
+        """Drop this account's cached order lists.
+
+        Called after every order-mutating request, so a card re-rendered
+        right after an action shows the new status instead of the one
+        captured up to ORDERS_CACHE_TTL_SECONDS ago.
+        """
+        self._orders_cache.clear()
+
+    async def get_orders(
+        self, statuses: list[str] | None = None, limit: int = 20, *, use_cache: bool = False
+    ) -> list[dict]:
+        """Fetch this account's orders, walking every page.
+
+        use_cache is opt-in rather than the default on purpose: the whole
+        job of tasks._orders_poll_loop is to notice orders that appeared
+        since its last pass, and serving it a copy up to five minutes old
+        would delay every new-order notification by that much. Interactive
+        screens (order list, order card, the lookups behind the action
+        flows) pass use_cache=True — there the same list is re-fetched
+        several times within seconds and staleness costs nothing.
+        """
+        cache_key = (tuple(statuses) if statuses else None, limit)
+        if use_cache:
+            entry = self._orders_cache.get(cache_key)
+            if entry is not None and time.monotonic() - entry[0] < ORDERS_CACHE_TTL_SECONDS:
+                # Copy the list: callers filter/extend their own results
+                # and must not be able to mutate what stays cached.
+                return list(entry[1])
+
         # Avito rejects a single comma-joined "statuses" value (confirmed
         # live: 400 "... does not exist in enum") — it wants the query
         # param repeated once per status, which aiohttp only produces from
@@ -475,19 +508,24 @@ class AvitoClient:
             all_orders.extend(orders)
             if not orders or not data.get("hasMore"):
                 break
-        return all_orders
+        self._orders_cache[cache_key] = (time.monotonic(), all_orders)
+        return list(all_orders)
 
     async def apply_order_transition(self, order_id: str, transition: str) -> dict:
-        return await self._request(
+        result = await self._request(
             "POST", "/order-management/1/order/applyTransition",
             json={"orderId": order_id, "transition": transition},
         )
+        self.invalidate_orders_cache()
+        return result
 
     async def set_order_markings(self, item_id: str, order_id: str, markings: list[str]) -> dict:
-        return await self._request(
+        result = await self._request(
             "POST", "/order-management/1/markings",
             json={"markings": [{"itemId": item_id, "orderId": order_id, "markings": markings}]},
         )
+        self.invalidate_orders_cache()
+        return result
 
     async def set_cnc_order_details(self, order_id: str, marketplace_id: str, booking_period: int,
                                      address: str | None = None, details: str | None = None) -> dict:
@@ -496,13 +534,17 @@ class AvitoClient:
             body["address"] = address
         if details:
             body["details"] = details
-        return await self._request("POST", "/order-management/1/order/cncSetDetails", json=body)
+        result = await self._request("POST", "/order-management/1/order/cncSetDetails", json=body)
+        self.invalidate_orders_cache()
+        return result
 
     async def check_confirmation_code(self, parcel_id: str, confirm_code: str) -> dict:
-        return await self._request(
+        result = await self._request(
             "POST", "/order-management/1/order/checkConfirmationCode",
             json={"parcelID": parcel_id, "confirmCode": confirm_code},
         )
+        self.invalidate_orders_cache()
+        return result
 
 
 class AvitoClientPool:

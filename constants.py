@@ -48,6 +48,13 @@ ORDER_ACTIVE_STATUSES = ["on_confirmation", "ready_to_ship", "in_transit", "on_r
 # Safety ceiling for GET .../orders pagination (20/page) — well above any
 # realistic order count, guards against an "hasMore" that never goes false.
 ORDER_MAX_PAGES = 20
+# How long an interactive screen may reuse an already-fetched order list
+# instead of re-walking every page again. One full get_orders() on this
+# account is ~5 paginated requests at 1 req/sec, so reopening a card used
+# to cost seconds of waiting for data that had just been fetched. Only the
+# opt-in (use_cache=True) callers read it — the new-order poller never
+# does, so notifications stay as timely as ORDER_POLL_INTERVAL_SECONDS.
+ORDERS_CACHE_TTL_SECONDS = 300
 
 # --- User status ---------------------------------------------------------
 STATUS_PENDING = "pending"

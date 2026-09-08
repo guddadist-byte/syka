@@ -411,6 +411,13 @@ async def _orders_poll_loop(bot: Bot) -> None:
                 if client is None:
                     continue
                 try:
+                    # Deliberately NOT use_cache=True: this loop exists to
+                    # spot orders that appeared since the last pass, and a
+                    # cached copy would delay every new-order notification
+                    # by up to ORDERS_CACHE_TTL_SECONDS. It still refreshes
+                    # the cache for the interactive screens as a side
+                    # effect, so they usually read data at most one poll
+                    # interval old.
                     orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
                 except avito_client.AvitoAPIError:
                     continue

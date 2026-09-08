@@ -2082,7 +2082,7 @@ async def _show_all_orders(message: Message, actor_id: int) -> None:
         if client is None:
             continue
         try:
-            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES)
+            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=True)
         except avito_client.AvitoAPIError as exc:
             logger.exception("_show_all_orders: failed for account %s", account.id)
             errors.append(f"{account.name}: {exc}")
@@ -2112,7 +2112,7 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int) -
         await message.answer("⚠️ Аккаунт Avito недоступен.")
         return
     try:
-        orders = await client.get_orders()
+        orders = await client.get_orders(use_cache=True)
     except avito_client.AvitoAPIError as exc:
         logger.exception("_show_order_detail: failed for account %s", account_id)
         await message.answer(f"⚠️ Не удалось получить заказ от Avito: {exc}")
@@ -2247,7 +2247,7 @@ async def receive_order_markings(message: Message, state: FSMContext) -> None:
         return
     markings = [code.strip() for code in message.text.split(",") if code.strip()]
     try:
-        orders = await client.get_orders()
+        orders = await client.get_orders(use_cache=True)
         order = next((o for o in orders if o.get("id") == order_id), None)
         item_id = (order.get("items") or [{}])[0].get("avitoId") if order else None
         if item_id is None:
@@ -2270,7 +2270,7 @@ async def cb_order_cnc_start(callback: CallbackQuery, state: FSMContext) -> None
     marketplace_id = None
     if client is not None:
         try:
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
             order = next((o for o in orders if o.get("id") == order_id), None)
             marketplace_id = order.get("marketplaceId") if order else None
         except avito_client.AvitoAPIError:
@@ -2333,7 +2333,7 @@ async def cb_order_confirm_code_start(callback: CallbackQuery, state: FSMContext
     parcel_id = None
     if client is not None:
         try:
-            orders = await client.get_orders()
+            orders = await client.get_orders(use_cache=True)
             order = next((o for o in orders if o.get("id") == order_id), None)
             parcel_id = (order.get("delivery") or {}).get("dispatchNumber") if order else None
         except avito_client.AvitoAPIError:
