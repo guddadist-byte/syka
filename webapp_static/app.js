@@ -4,11 +4,10 @@ const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : 
 if (tg) {
   tg.ready();
   tg.expand();
-  // Kept in step with --bg-top / --bg-bottom in style.css; these were left
-  // on the old burgundy values by the restyle, so Telegram's own header
-  // didn't match the app underneath it.
-  try { tg.setHeaderColor("#28282b"); } catch (e) {}
-  try { tg.setBackgroundColor("#09090a"); } catch (e) {}
+  // Kept in step with --bg-top / --bg-bottom in style.css so Telegram's own
+  // header does not sit as a dark band above a light app.
+  try { tg.setHeaderColor("#bcbcbe"); } catch (e) {}
+  try { tg.setBackgroundColor("#a6a6a9"); } catch (e) {}
 }
 
 const INIT_DATA = tg ? tg.initData : "";
@@ -129,6 +128,118 @@ function syncNativeBack(show) {
 }
 
 // ============================================================================
+// Left rail (primary navigation)
+// ============================================================================
+
+// Line icons rather than emoji: emoji render in each platform's own colors
+// and instantly break a monochrome design (and look different on iOS,
+// Android and desktop). These inherit currentColor, so the same markup
+// works on the dark rail and on the light tiles.
+function svg(body) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+         'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + body + '</svg>';
+}
+
+const ICONS = {
+  home: svg('<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.4V21h13V9.4"/>'),
+  inbox: svg('<path d="M4 5h16l2 8v6H2v-6z"/><path d="M2 13h5l2 3h6l2-3h5"/>'),
+  clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5.2l3.2 1.9"/>'),
+  pin: svg('<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.4"/>'),
+  box: svg('<path d="M21 7.8 12 3 3 7.8v8.4L12 21l9-4.8z"/><path d="M3 7.8 12 12.6l9-4.8"/><path d="M12 12.6V21"/>'),
+  user: svg('<circle cx="12" cy="8" r="3.6"/><path d="M4.6 20a7.4 7.4 0 0 1 14.8 0"/>'),
+  list: svg('<path d="M8.5 6H20M8.5 12H20M8.5 18H20"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>'),
+  // Sliders rather than a cog: at 21px a cog's teeth turn to mush, and the
+  // simplified outline that survives reads as a sun instead.
+  gear: svg('<path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h9M19 18h1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="16" cy="18" r="2.2"/>'),
+  briefcase: svg('<rect x="3" y="7.5" width="18" height="12" rx="2.5"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M3 12.5h18"/>'),
+  moon: svg('<path d="M20 13.4A8.5 8.5 0 1 1 10.6 4a6.8 6.8 0 0 0 9.4 9.4z"/>'),
+};
+
+// id is what the rail highlights on. "chats" needs two entries with the
+// same screen and different params, hence an explicit id rather than the
+// screen name alone.
+function navItems(me) {
+  const items = [
+    { id: "home", screen: "home", params: {}, icon: "home", label: "Главная" },
+    { id: "chats:unread", screen: "chats", params: { filter: "unread" }, icon: "inbox", label: "Непрочитанные", badge: true },
+    { id: "chats:recent", screen: "chats", params: { filter: "recent" }, icon: "clock", label: "Недавние" },
+    { id: "points", screen: "points", params: {}, icon: "pin", label: "Мои точки" },
+    { id: "orders", screen: "orders", params: {}, icon: "box", label: "Заказы Avito" },
+    { id: "profile", screen: "profile", params: {}, icon: "user", label: "Мой профиль" },
+  ];
+  if (me && me.is_manager_or_above) {
+    items.push({ id: "myTemplates", screen: "myTemplates", params: {}, icon: "list", label: "Мои шаблоны" });
+  }
+  if (me && me.is_admin) {
+    // Pinned to the bottom of the rail, away from everyday work.
+    items.push({ id: "adminHome", screen: "adminHome", params: {}, icon: "gear", label: "Админ-панель", bottom: true });
+  }
+  return items;
+}
+
+// Drill-down screens keep their parent section lit rather than clearing the
+// rail — opening one chat is still "being in" the chat list.
+function navIdFor(screen, params) {
+  if (screen === "chats") return "chats:" + ((params && params.filter) || "unread");
+  if (screen === "chatDetail") return null;      // keep whichever chats entry is lit
+  if (screen === "orderDetail") return "orders";
+  if (screen.indexOf("admin") === 0) return "adminHome";
+  return screen;
+}
+
+const railEl = document.getElementById("rail");
+let railUnread = 0;
+
+function buildRail() {
+  const items = navItems(state.me);
+  let html = "";
+  let hotkey = 0;
+  items.forEach(item => {
+    hotkey += 1;
+    if (item.bottom) html += '<div class="rail-spacer"></div><div class="rail-sep"></div>';
+    const badge = item.badge && railUnread
+      ? `<span class="rail-badge">${railUnread > 99 ? "99+" : railUnread}</span>` : "";
+    html += `<button class="rail-btn" data-nav="${item.id}" data-hotkey="${hotkey}"
+      title="${escAttr(item.label)} (${hotkey})" aria-label="${escAttr(item.label)}">${ICONS[item.icon]}${badge}</button>`;
+  });
+  railEl.innerHTML = html;
+  railEl.querySelectorAll("[data-nav]").forEach(btn => {
+    const item = items.find(i => i.id === btn.dataset.nav);
+    btn.addEventListener("click", () => navTo(item));
+  });
+  markRailActive(navIdFor(currentScreen, currentParams));
+}
+
+function markRailActive(navId) {
+  if (!navId) return;
+  railEl.querySelectorAll(".rail-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.nav === navId);
+  });
+}
+
+// Rail entries are top-level destinations, so they reset the trail instead
+// of stacking onto it — otherwise Back walks through every section the user
+// tapped on the way here rather than returning to the home screen.
+function navTo(item) {
+  if (!item) return;
+  if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.selectionChanged(); } catch (e) {} }
+  state.history = item.screen === "home" ? [] : [{ screen: "home", params: {} }];
+  render(item.screen, Object.assign({}, item.params));
+}
+
+// Hotkeys — Telegram Desktop has a real keyboard, and the rail doubles as
+// the legend for them (each button's tooltip carries its digit).
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+  if (e.key === "Escape") { backBtn.click(); return; }
+  if (!/^[1-9]$/.test(e.key)) return;
+  const btn = railEl.querySelector(`[data-hotkey="${e.key}"]`);
+  if (btn) { e.preventDefault(); btn.click(); }
+});
+
+// ============================================================================
 // Screens
 // ============================================================================
 
@@ -141,6 +252,7 @@ async function render(screen, params, isBack) {
     // history already pushed by go()
   }
   syncNativeBack(screen !== "home");
+  markRailActive(navIdFor(screen, currentParams));
   const fn = SCREENS[screen];
   if (!fn) { renderHome(); return; }
   await fn(currentParams);
@@ -161,44 +273,49 @@ async function renderHome() {
       if (chats.chats.length) unreadCount = chats.chats.length;
     } catch (e) {}
 
+    // The rail is built here rather than at boot: which entries it has
+    // depends on the role, and /me is what tells us the role.
+    railUnread = unreadCount || 0;
+    buildRail();
+
     headerTitle.textContent = me.full_name || "GUDDA CRM";
     headerSubtitle.textContent = me.role_label + (me.points.length ? " · " + me.points.map(p => p.name).join(", ") : "");
 
     screenRoot.innerHTML = `
       <div class="tiles">
         <button class="tile wide ${me.on_shift ? "shift-on" : "shift-off"}" id="shiftTile">
-          <span class="tile-icon">${me.on_shift ? "💼" : "🛌"}</span>
+          <span class="tile-icon">${me.on_shift ? ICONS.briefcase : ICONS.moon}</span>
           <span class="tile-label">${me.on_shift ? "Вы на смене — нажмите, чтобы уйти отдыхать" : "Вы отдыхаете — нажмите, чтобы выйти на смену"}</span>
         </button>
         <button class="tile" data-go="chats" data-filter="unread">
-          <span class="tile-icon">📩</span>
+          <span class="tile-icon">${ICONS.inbox}</span>
           <span class="tile-label">Непрочитанные</span>
           ${unreadCount ? `<span class="tile-badge">${unreadCount}</span>` : ""}
         </button>
         <button class="tile" data-go="chats" data-filter="recent">
-          <span class="tile-icon">🕒</span>
+          <span class="tile-icon">${ICONS.clock}</span>
           <span class="tile-label">Недавние</span>
         </button>
         <button class="tile" data-go="points">
-          <span class="tile-icon">📍</span>
+          <span class="tile-icon">${ICONS.pin}</span>
           <span class="tile-label">Мои точки</span>
         </button>
         <button class="tile" data-go="orders">
-          <span class="tile-icon">📦</span>
+          <span class="tile-icon">${ICONS.box}</span>
           <span class="tile-label">Заказы Avito</span>
         </button>
-        <button class="tile ${me.is_admin ? "" : "wide"}" data-go="profile">
-          <span class="tile-icon">👤</span>
+        <button class="tile" data-go="profile">
+          <span class="tile-icon">${ICONS.user}</span>
           <span class="tile-label">Мой профиль</span>
         </button>
         ${me.is_manager_or_above ? `
-        <button class="tile ${me.is_admin ? "" : "wide"}" data-go="myTemplates">
-          <span class="tile-icon">📋</span>
+        <button class="tile" data-go="myTemplates">
+          <span class="tile-icon">${ICONS.list}</span>
           <span class="tile-label">Мои шаблоны</span>
         </button>` : ""}
         ${me.is_admin ? `
         <button class="tile wide" data-go="adminHome">
-          <span class="tile-icon">⚙️</span>
+          <span class="tile-icon">${ICONS.gear}</span>
           <span class="tile-label">Админ-панель</span>
         </button>` : ""}
       </div>

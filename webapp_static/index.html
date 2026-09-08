@@ -20,16 +20,22 @@
 
 <div id="app">
 
-  <div class="app-header" id="header">
-    <button class="back-btn" id="backBtn" hidden>‹ Назад</button>
-    <img class="app-logo" id="headerLogo" src="assets/logo.png" alt="GUDDA">
-    <div class="app-header-text">
-      <div class="app-title" id="headerTitle">GUDDA CRM</div>
-      <div class="app-subtitle" id="headerSubtitle">загрузка…</div>
-    </div>
-  </div>
+  <!-- Primary navigation. Filled in by app.js because which entries exist
+       depends on the signed-in user's role. -->
+  <nav class="rail" id="rail" aria-label="Разделы"></nav>
 
-  <div id="screen-root" class="screen"></div>
+  <div class="app-main">
+    <div class="app-header" id="header">
+      <button class="back-btn" id="backBtn" hidden>‹ Назад</button>
+      <img class="app-logo" id="headerLogo" src="assets/logo.png" alt="GUDDA">
+      <div class="app-header-text">
+        <div class="app-title" id="headerTitle">GUDDA CRM</div>
+        <div class="app-subtitle" id="headerSubtitle">загрузка…</div>
+      </div>
+    </div>
+
+    <div id="screen-root" class="screen"></div>
+  </div>
 
 </div>
 
