@@ -402,8 +402,14 @@ async def _notify_new_order(bot: Bot, order: dict, account_id: int) -> None:
 
 
 async def _orders_poll_loop(bot: Bot) -> None:
+    # The first pass runs immediately instead of after a sleep. It does two
+    # useful things at startup: it warms the order cache the screens read
+    # (otherwise the first order list opened within the poll interval of a
+    # restart pays for a full paginated fetch), and it gets orders that
+    # arrived during the downtime notified that much sooner. Moving it
+    # earlier cannot cause a re-notification: dedup lives in the
+    # seen_avito_orders table, which survives the restart.
     while True:
-        await asyncio.sleep(constants.ORDER_POLL_INTERVAL_SECONDS)
         try:
             accounts = await database.list_avito_accounts(active_only=True)
             for account in accounts:
@@ -442,6 +448,7 @@ async def _orders_poll_loop(bot: Bot) -> None:
                     await _notify_new_order(bot, order, account.id)
         except Exception:
             logger.exception("_orders_poll_loop: failed")
+        await asyncio.sleep(constants.ORDER_POLL_INTERVAL_SECONDS)
 
 
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:

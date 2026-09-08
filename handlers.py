@@ -2112,12 +2112,11 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int) -
         await message.answer("⚠️ Аккаунт Avito недоступен.")
         return
     try:
-        orders = await client.get_orders(use_cache=True)
+        order = await client.find_order(order_id)
     except avito_client.AvitoAPIError as exc:
         logger.exception("_show_order_detail: failed for account %s", account_id)
         await message.answer(f"⚠️ Не удалось получить заказ от Avito: {exc}")
         return
-    order = next((o for o in orders if str(o.get("id")) == str(order_id)), None)
     if order is None:
         await message.answer("⚠️ Заказ не найден (возможно, статус уже изменился).")
         return
@@ -2247,8 +2246,7 @@ async def receive_order_markings(message: Message, state: FSMContext) -> None:
         return
     markings = [code.strip() for code in message.text.split(",") if code.strip()]
     try:
-        orders = await client.get_orders(use_cache=True)
-        order = next((o for o in orders if o.get("id") == order_id), None)
+        order = await client.find_order(order_id)
         item_id = (order.get("items") or [{}])[0].get("avitoId") if order else None
         if item_id is None:
             raise avito_client.AvitoAPIError("no item found for order")
@@ -2270,8 +2268,7 @@ async def cb_order_cnc_start(callback: CallbackQuery, state: FSMContext) -> None
     marketplace_id = None
     if client is not None:
         try:
-            orders = await client.get_orders(use_cache=True)
-            order = next((o for o in orders if o.get("id") == order_id), None)
+            order = await client.find_order(order_id)
             marketplace_id = order.get("marketplaceId") if order else None
         except avito_client.AvitoAPIError:
             pass
@@ -2333,8 +2330,7 @@ async def cb_order_confirm_code_start(callback: CallbackQuery, state: FSMContext
     parcel_id = None
     if client is not None:
         try:
-            orders = await client.get_orders(use_cache=True)
-            order = next((o for o in orders if o.get("id") == order_id), None)
+            order = await client.find_order(order_id)
             parcel_id = (order.get("delivery") or {}).get("dispatchNumber") if order else None
         except avito_client.AvitoAPIError:
             pass

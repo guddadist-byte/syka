@@ -35,6 +35,7 @@ from constants import (
     AVITO_MAX_RETRIES,
     AVITO_MIN_REQUEST_INTERVAL_SECONDS,
     INFLIGHT_SHUTDOWN_TIMEOUT_SECONDS,
+    ORDER_ACTIVE_STATUSES,
     ORDER_MAX_PAGES,
     ORDERS_CACHE_TTL_SECONDS,
 )
@@ -510,6 +511,39 @@ class AvitoClient:
                 break
         self._orders_cache[cache_key] = (time.monotonic(), all_orders)
         return list(all_orders)
+
+    async def find_order(self, order_id: str) -> dict | None:
+        """Find one order by id, preferring orders already held in memory.
+
+        Every screen that needs a single order reached it from the list of
+        active orders, so that list — kept warm by the order poller and by
+        the list screen itself — almost always contains it. What these
+        callers used to do instead was a bare get_orders(): a second
+        paginated walk over *every* order on the account, closed and
+        delivered ones included, which is a far bigger set than the active
+        list, just to pick one entry out of it. That walk, not the render,
+        was the bulk of the wait when opening an order card.
+
+        The full fetch survives as a last resort, for an order that is
+        genuinely no longer active (one that just moved to delivered or
+        closed, say) — correctness first, speed for the common case.
+        """
+        wanted = str(order_id)
+
+        def _pick(orders: list[dict]) -> dict | None:
+            return next((o for o in orders if str(o.get("id")) == wanted), None)
+
+        now = time.monotonic()
+        for fetched_at, orders in self._orders_cache.values():
+            if now - fetched_at < ORDERS_CACHE_TTL_SECONDS:
+                found = _pick(orders)
+                if found is not None:
+                    return found
+
+        found = _pick(await self.get_orders(statuses=ORDER_ACTIVE_STATUSES, use_cache=True))
+        if found is not None:
+            return found
+        return _pick(await self.get_orders(use_cache=True))
 
     async def apply_order_transition(self, order_id: str, transition: str) -> dict:
         result = await self._request(
