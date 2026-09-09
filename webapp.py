@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
+import html
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ import bot_cache
 import constants
 import database
 import guardrail
+import keyboards
 import models
 import utils
 
@@ -812,16 +814,34 @@ async def api_order_action(request: web.Request) -> web.Response:
 # ============================================================================
 
 
-async def _notify_user_safe(bot, telegram_id: int, text: str) -> None:
+async def _notify_user_safe(bot, telegram_id: int, text: str, reply_markup=None) -> None:
     if bot is None:
         return
     try:
-        await bot.send_message(telegram_id, text)
+        await bot.send_message(telegram_id, text, reply_markup=reply_markup)
         await database.mark_user_reachable(telegram_id)
     except TelegramForbiddenError:
         await database.mark_user_unreachable(telegram_id)
     except Exception:
         logger.exception("_notify_user_safe: failed to notify %s", telegram_id)
+
+
+async def _notify_access_changed(bot, telegram_id: int, text: str) -> None:
+    """Notify about a role/access change and refresh the person's menu.
+
+    The bot's reply keyboard is built from the role and only changes when a
+    message carrying a new one arrives, so a role granted from the Mini App
+    otherwise left the person in the bot with their old buttons until they
+    happened to press /start. Mirrors _notify_access_changed in handlers.py
+    — the two interfaces are deliberately independent.
+    """
+    user = await database.get_user(telegram_id)
+    if user is None:
+        return
+    await _notify_user_safe(
+        bot, telegram_id, text,
+        reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role),
+    )
 
 
 async def api_admin_users(request: web.Request) -> web.Response:
@@ -885,7 +905,14 @@ async def api_admin_user_role(request: web.Request) -> web.Response:
     else:
         await database.set_user_role(target_id, role, actor.telegram_id)
 
-    await _notify_user_safe(request.app.get("bot"), target_id, f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[role]}")
+    lines = [f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[role]}"]
+    if role == constants.MANAGER:
+        point = await database.get_point(int(body["point_id"]))
+        if point is not None:
+            lines.append(f"📍 Ваша точка: {html.escape(point.name)}")
+    lines.append("")
+    lines.append("Меню обновлено. Если кнопки не изменились — нажмите /start.")
+    await _notify_access_changed(request.app.get("bot"), target_id, "\n".join(lines))
     return web.json_response({"ok": True})
 
 
@@ -938,7 +965,10 @@ async def api_admin_user_unblock(request: web.Request) -> web.Response:
     if target.status != constants.STATUS_BLOCKED:
         return web.json_response({"error": "not_blocked", "status": target.status}, status=409)
     await database.set_user_status(target_id, constants.STATUS_APPROVED, request["user"].telegram_id)
-    await _notify_user_safe(request.app.get("bot"), target_id, "✅ Ваш доступ восстановлен.")
+    await _notify_access_changed(
+        request.app.get("bot"), target_id,
+        "✅ Ваш доступ восстановлен.\n\nМеню обновлено. Если кнопки не появились — нажмите /start.",
+    )
     return web.json_response({"ok": True})
 
 

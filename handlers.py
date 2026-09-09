@@ -970,11 +970,10 @@ async def admin_unblock_by_id_finish(message: Message, state: FSMContext) -> Non
         return
 
     await database.set_user_status(target_id, constants.STATUS_APPROVED, message.from_user.id)
-    try:
-        await message.bot.send_message(target_id, "✅ Ваш доступ восстановлен.")
-        await database.mark_user_reachable(target_id)
-    except TelegramForbiddenError:
-        await database.mark_user_unreachable(target_id)
+    await _notify_access_changed(
+        message.bot, target_id,
+        "✅ Ваш доступ восстановлен.\n\nМеню обновлено. Если кнопки не появились — нажмите /start.",
+    )
 
     label = target.full_name or target.username or str(target.telegram_id)
     await message.answer(f"🔓 Пользователь {label} разблокирован.")
@@ -1075,10 +1074,42 @@ async def cb_admin_set_role(callback: CallbackQuery) -> None:
 
     await database.set_user_role(user_id, role, callback.from_user.id)
     await callback.message.answer("✅ Роль изменена.")
+    await _notify_access_changed(callback.bot, user_id, _role_changed_text(role))
+
+
+async def _notify_access_changed(bot, user_id: int, text: str) -> None:
+    """Tell a user their role or access changed — and hand them a new menu.
+
+    The reply keyboard is built from the role (keyboards.main_menu_kb), and
+    Telegram only replaces it when a message carrying a new one arrives. So
+    a role change alone left the person on yesterday's buttons: a freshly
+    promoted РОП had no «Меню руководителя» until they happened to press
+    /start, and someone just unblocked had no menu at all. Sending the
+    refreshed keyboard along with the notice makes the menu change as they
+    read it; the /start hint in the text is only there for the case where
+    Telegram drops the keyboard.
+    """
+    user = await database.get_user(user_id)
+    if user is None:
+        return
     try:
-        await callback.bot.send_message(user_id, f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[role]}")
+        await bot.send_message(
+            user_id, text, reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role)
+        )
+        await database.mark_user_reachable(user_id)
     except TelegramForbiddenError:
         await database.mark_user_unreachable(user_id)
+    except Exception:
+        logger.exception("_notify_access_changed: failed to notify %s", user_id)
+
+
+def _role_changed_text(role: str, point_name: str | None = None) -> str:
+    lines = [f"🎭 Ваша роль изменена: {constants.ROLE_LABELS.get(role, role)}"]
+    if point_name:
+        lines.append(f"📍 Ваша точка: {html.escape(point_name)}")
+    lines.append("")
+    lines.append("Меню обновлено. Если кнопки не изменились — нажмите /start.")
+    return "\n".join(lines)
 
 
 @admin_router.callback_query(F.data.startswith(f"{constants.PREFIX_APPR}_"))
@@ -1182,12 +1213,11 @@ async def cb_point_action(callback: CallbackQuery, state: FSMContext) -> None:
         await database.set_user_role(user_id, constants.MANAGER, callback.from_user.id)
         await database.set_responsible_point(user_id, point_id)
         await callback.message.answer("✅ Роль «Ответственный точки» назначена.")
-        try:
-            await callback.bot.send_message(
-                user_id, f"🎭 Ваша роль изменена: {constants.ROLE_LABELS[constants.MANAGER]}"
-            )
-        except TelegramForbiddenError:
-            await database.mark_user_unreachable(user_id)
+        point = await database.get_point(point_id)
+        await _notify_access_changed(
+            callback.bot, user_id,
+            _role_changed_text(constants.MANAGER, point.name if point else None),
+        )
     elif mode == "reassign":
         chat = await bot_cache.resolve_chat(key)
         if chat and chat.item_id:
