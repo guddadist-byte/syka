@@ -1496,6 +1496,11 @@ async def api_admin_broadcast(request: web.Request) -> web.Response:
     role_label = constants.ROLE_LABELS.get(actor.role, "")
     full_text = f"{text}\n\n— {signature_name}, {role_label}"
 
+    # See the same guard in handlers.py: a caption over Telegram's limit is
+    # rejected for every recipient, so a long text rides as its own message
+    # under the photo instead.
+    caption = full_text if len(full_text) <= constants.TELEGRAM_CAPTION_LIMIT else None
+
     bot = request.app.get("bot")
     sent = failed = 0
     photo_file_id: str | None = None
@@ -1516,9 +1521,11 @@ async def api_admin_broadcast(request: web.Request) -> web.Response:
                         if photo_file_id is not None
                         else BufferedInputFile(photo_bytes, filename="broadcast.jpg")
                     )
-                    msg = await bot.send_photo(user.telegram_id, photo, caption=full_text)
+                    msg = await bot.send_photo(user.telegram_id, photo, caption=caption)
                     if photo_file_id is None and msg.photo:
                         photo_file_id = msg.photo[-1].file_id
+                    if caption is None:
+                        await bot.send_message(user.telegram_id, full_text)
                 else:
                     await bot.send_message(user.telegram_id, full_text)
                 sent += 1

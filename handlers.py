@@ -1250,11 +1250,19 @@ async def cb_admin_broadcast_send(callback: CallbackQuery, state: FSMContext) ->
     role_label = constants.ROLE_LABELS.get(actor.role, "") if actor else ""
     full_text = f"{text}\n\n— {signature_name}, {role_label}"
 
+    # Too long to be a caption -> photo first, text as its own message under
+    # it. Passing it as the caption anyway makes Telegram reject the send for
+    # every single recipient, and the broadcast reports "доставлено: 0" with
+    # no hint that the length was the problem.
+    caption = full_text if len(full_text) <= constants.TELEGRAM_CAPTION_LIMIT else None
+
     sent = failed = 0
     for user in await database.list_approved_users():
         try:
             if photo_id:
-                await callback.bot.send_photo(user.telegram_id, photo_id, caption=full_text)
+                await callback.bot.send_photo(user.telegram_id, photo_id, caption=caption)
+                if caption is None:
+                    await callback.bot.send_message(user.telegram_id, full_text)
             else:
                 await callback.bot.send_message(user.telegram_id, full_text)
             sent += 1

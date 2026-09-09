@@ -146,6 +146,11 @@ MESSAGE_RETENTION_DAYS = 30
 BACKUP_LOOP_INTERVAL_SECONDS = 3600
 ORDER_POLL_INTERVAL_SECONDS = 120
 
+# Telegram caps a photo caption at 1024 characters (a plain message allows
+# 4096). A broadcast whose text is longer therefore cannot ride along as a
+# caption — it is sent as its own message right under the photo instead.
+TELEGRAM_CAPTION_LIMIT = 1024
+
 ERROR_BACKOFF_BASE_SECONDS = 30
 ERROR_BACKOFF_MAX_SECONDS = 600
 
