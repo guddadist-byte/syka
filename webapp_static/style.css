@@ -327,6 +327,61 @@ html, body {
 .btn.small { padding: 9px 14px; font-size: 13px; }
 .btn:disabled { opacity: 0.45; }
 
+/* --- Inline icons + status dots ------------------------------------------ */
+
+/* The icon set inherits currentColor, so one size rule covers every place
+   an icon sits next to a label. */
+.btn svg, .list-btn svg, .icon-btn svg, .card svg, .chat-actions svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.icon-btn svg { width: 19px; height: 19px; }
+
+.list-btn .name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.list-btn .name svg { color: var(--text-dim); }
+.list-btn.lead .name svg { color: var(--ink); }
+
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.5);
+}
+
+.dot.on { background: var(--success); }
+.dot.off { background: rgba(0, 0, 0, 0.28); }
+
+/* "Фото" / "Вложение" stand-ins inside a message bubble */
+.msg-att {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.85;
+}
+
+.msg-att svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+.stars {
+  display: inline-flex;
+  gap: 1px;
+}
+
+.stars svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
 /* --- Cards / lists --------------------------------------------------------- */
 
 .card {

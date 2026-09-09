@@ -153,7 +153,48 @@ const ICONS = {
   gear: svg('<path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h9M19 18h1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="16" cy="18" r="2.2"/>'),
   briefcase: svg('<rect x="3" y="7.5" width="18" height="12" rx="2.5"/><path d="M9 7.5V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.5"/><path d="M3 12.5h18"/>'),
   moon: svg('<path d="M20 13.4A8.5 8.5 0 1 1 10.6 4a6.8 6.8 0 0 0 9.4 9.4z"/>'),
+
+  // Actions
+  check: svg('<path d="M20 6.5 9.5 17.5 4 12"/>'),
+  x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  refresh: svg('<path d="M20.4 12a8.4 8.4 0 1 1-2.5-6"/><path d="M20.5 4.2v5h-5"/>'),
+  trash: svg('<path d="M4 7h16"/><path d="M9.5 7V5.3A1.3 1.3 0 0 1 10.8 4h2.4a1.3 1.3 0 0 1 1.3 1.3V7"/><path d="M6.6 7l.8 12.1A1.5 1.5 0 0 0 8.9 20.5h6.2a1.5 1.5 0 0 0 1.5-1.4L17.4 7"/>'),
+  plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  send: svg('<path d="M4.6 11.9 20 4.4 15.4 20l-4-6.6z"/><path d="M11.4 13.4 20 4.4"/>'),
+  save: svg('<path d="M4.5 4.5h11l4 4v11h-15z"/><path d="M8 4.5v5h6.5v-5"/><path d="M8 13h8v6.5H8z"/>'),
+  upload: svg('<path d="M12 16.2V4.4"/><path d="M7.6 8.8 12 4.4l4.4 4.4"/><path d="M4.6 15v4.6h14.8V15"/>'),
+  download: svg('<path d="M12 4.4v11.8"/><path d="M7.6 11.8 12 16.2l4.4-4.4"/><path d="M4.6 15v4.6h14.8V15"/>'),
+  search: svg('<circle cx="11" cy="11" r="6.4"/><path d="m15.8 15.8 4.6 4.6"/>'),
+  map: svg('<path d="M9 4.4 3.6 6.7v12.9L9 17.3l6 2.3 5.4-2.3V4.4L15 6.7z"/><path d="M9 4.4v12.9M15 6.7v12.9"/>'),
+  unlock: svg('<rect x="4.6" y="10.4" width="14.8" height="9.6" rx="2.2"/><path d="M8 10.4V7.3A4 4 0 0 1 15.6 6"/>'),
+  ban: svg('<circle cx="12" cy="12" r="8.4"/><path d="m6.1 6.1 11.8 11.8"/>'),
+  refund: svg('<path d="M4.2 9.4h11.4a4.6 4.6 0 0 1 0 9.2H9"/><path d="M7.6 6 4.2 9.4 7.6 12.8"/>'),
+
+  // Objects
+  ai: svg('<path d="M12 3.4 13.7 9l5.6 1.7-5.6 1.7L12 18l-1.7-5.6L4.7 10.7 10.3 9z"/><path d="m18.4 15.4.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/>'),
+  doc: svg('<path d="M6 3.6h7.4L19 9.2v11.2H6z"/><path d="M13.4 3.6v5.6H19"/><path d="M9 13.2h7M9 16.6h5"/>'),
+  camera: svg('<path d="M3 8.6h3.6L8 6h8l1.4 2.6H21v10.9H3z"/><circle cx="12" cy="13.6" r="3.4"/>'),
+  clip: svg('<path d="m17.4 10.6-6.5 6.5a3.5 3.5 0 0 1-5-5l7-7a2.5 2.5 0 0 1 3.6 3.5l-7 7a1.5 1.5 0 0 1-2.1-2.1l6.4-6.4"/>'),
+  tag: svg('<path d="M3.6 11.4V4h7.4l9 9a1.7 1.7 0 0 1 0 2.4l-5 5a1.7 1.7 0 0 1-2.4 0z"/><circle cx="7.4" cy="7.9" r="1.3"/>'),
+  star: svg('<path d="m12 4 2.5 5.3 5.6.8-4.1 3.9 1 5.6L12 17l-5 2.6 1-5.6L3.9 10l5.6-.8z"/>'),
+  chat: svg('<path d="M20.4 11.9c0 4-3.8 7.3-8.4 7.3-1 0-2-.1-2.9-.4L4 20.4l1.4-3.6a7 7 0 0 1-1.8-4.9c0-4 3.8-7.3 8.4-7.3s8.4 3.3 8.4 7.3z"/>'),
+  lead: svg('<path d="M12 3.5 13.6 9 19 10.6 13.6 12.2 12 17.6 10.4 12.2 5 10.6 10.4 9z"/>'),
+  users: svg('<circle cx="9.4" cy="8" r="3.3"/><path d="M3 20a6.4 6.4 0 0 1 12.8 0"/><path d="M16 5.2a3.3 3.3 0 0 1 0 6.4"/><path d="M18.2 20a6.5 6.5 0 0 0-1.7-4.4"/>'),
+  megaphone: svg('<path d="M4 10v4h3l7 4V6l-7 4z"/><path d="M17.4 9.2a4 4 0 0 1 0 5.6"/>'),
+  building: svg('<path d="M4 20.4V5.6A1.6 1.6 0 0 1 5.6 4h6.8A1.6 1.6 0 0 1 14 5.6v14.8"/><path d="M14 10h4.4A1.6 1.6 0 0 1 20 11.6v8.8"/><path d="M2.6 20.4h18.8"/><path d="M7 8h4M7 12h4M7 16h4"/>'),
+  key: svg('<circle cx="7.8" cy="12" r="3.9"/><path d="M11.7 12h9"/><path d="M17.4 12v3.2M20.4 12v2.2"/>'),
+  globe: svg('<circle cx="12" cy="12" r="8.4"/><path d="M3.6 12h16.8"/><path d="M12 3.6a13 13 0 0 1 0 16.8 13 13 0 0 1 0-16.8z"/>'),
+  mail: svg('<rect x="3.2" y="5.6" width="17.6" height="12.8" rx="2.2"/><path d="m3.8 6.9 8.2 5.8 8.2-5.8"/>'),
+  // A pin struck through: a chat we could not tie to any branch.
+  pinOff: svg('<path d="M12 20.8s6.8-6.1 6.8-10.8a6.8 6.8 0 0 0-9.8-6.1"/><path d="M5.4 7.3A6.8 6.8 0 0 0 5.2 10c0 4.7 6.8 10.8 6.8 10.8"/><path d="m4 4 16 16"/>'),
+  shield: svg('<path d="M12 3.6 5.2 6v5.5c0 4.2 2.8 7.5 6.8 8.9 4-1.4 6.8-4.7 6.8-8.9V6z"/>'),
+  crown: svg('<path d="M4 17.4 5.4 7l4.1 3.5L12 5l2.5 5.5L18.6 7 20 17.4z"/><path d="M4.4 20.2h15.2"/>'),
 };
+
+// A status dot beats a 🟢/🔴 emoji here: emoji circles are rendered by the
+// platform's own font, so they arrive at different sizes and shades on iOS,
+// Android and desktop and never line up with the text next to them.
+function dot(on) { return `<span class="dot ${on ? "on" : "off"}"></span>`; }
 
 // id is what the rail highlights on. "chats" needs two entries with the
 // same screen and different params, hence an explicit id rather than the
@@ -171,11 +212,22 @@ function navItems(me) {
     items.push({ id: "myTemplates", screen: "myTemplates", params: {}, icon: "list", label: "Мои шаблоны" });
   }
   if (me && me.is_admin) {
-    // Pinned to the bottom of the rail, away from everyday work.
-    items.push({ id: "adminHome", screen: "adminHome", params: {}, icon: "gear", label: "Админ-панель", bottom: true });
+    // Both pinned to the bottom of the rail, away from everyday work.
+    items.push({ id: "leadershipHome", screen: "leadershipHome", params: {}, icon: "shield", label: "Меню руководителя", bottom: true });
+  }
+  if (me && me.is_director) {
+    items.push({ id: "adminHome", screen: "adminHome", params: {}, icon: "gear", label: "Настройки" });
   }
   return items;
 }
+
+// Kept in step with the rows in renderAdminHome, and with _require_director
+// on the server: these are the director-only settings screens, everything
+// else under admin* is leadership work open to a РОП.
+const SETTINGS_SCREENS = [
+  "adminHome", "adminPoints", "adminPointEdit", "adminAvito", "adminAI",
+  "adminProxy", "adminPayment", "adminWelcome", "adminBackup",
+];
 
 // Drill-down screens keep their parent section lit rather than clearing the
 // rail — opening one chat is still "being in" the chat list.
@@ -183,7 +235,10 @@ function navIdFor(screen, params) {
   if (screen === "chats") return "chats:" + ((params && params.filter) || "unread");
   if (screen === "chatDetail") return null;      // keep whichever chats entry is lit
   if (screen === "orderDetail") return "orders";
-  if (screen.indexOf("admin") === 0) return "adminHome";
+  // Settings screens belong to the director's menu; every other admin
+  // screen is leadership work and lights that entry instead.
+  if (SETTINGS_SCREENS.indexOf(screen) >= 0) return "adminHome";
+  if (screen.indexOf("admin") === 0) return "leadershipHome";
   return screen;
 }
 
@@ -314,9 +369,14 @@ async function renderHome() {
           <span class="tile-label">Мои шаблоны</span>
         </button>` : ""}
         ${me.is_admin ? `
-        <button class="tile wide" data-go="adminHome">
+        <button class="tile" data-go="leadershipHome">
+          <span class="tile-icon">${ICONS.shield}</span>
+          <span class="tile-label">Меню руководителя</span>
+        </button>` : ""}
+        ${me.is_director ? `
+        <button class="tile" data-go="adminHome">
           <span class="tile-icon">${ICONS.gear}</span>
-          <span class="tile-label">Админ-панель</span>
+          <span class="tile-label">Настройки</span>
         </button>` : ""}
       </div>
     `;
@@ -376,10 +436,10 @@ async function renderChats(params) {
     screenRoot.innerHTML = data.chats.map(c => `
       <button class="list-btn ${c.is_new_lead ? "lead" : ""}" data-short="${esc(c.short_id)}">
         <div class="row-top">
-          <span class="name">${c.is_new_lead ? "🆕 " : "💬 "}${esc(c.client_name || "Клиент")}</span>
+          <span class="name">${c.is_new_lead ? ICONS.lead : ICONS.chat}${esc(c.client_name || "Клиент")}</span>
           ${c.unread_count ? `<span class="unread-dot">${c.unread_count}</span>` : ""}
         </div>
-        ${c.item_title ? `<div class="preview">📦 ${esc(c.item_title)}</div>` : ""}
+        ${c.item_title ? `<div class="preview">${esc(c.item_title)}</div>` : ""}
       </button>
     `).join("");
     screenRoot.querySelectorAll("[data-short]").forEach(btn => {
@@ -404,7 +464,7 @@ async function renderChatDetail(params) {
       ${chat.item_title ? `
         <div class="card">
           <div class="card-row">
-            <span>📦 ${chat.item_url ? `<a href="${esc(chat.item_url)}" target="_blank" style="color:var(--accent-2)">${esc(chat.item_title)}</a>` : esc(chat.item_title)}</span>
+            <span>${ICONS.box} ${chat.item_url ? `<a href="${esc(chat.item_url)}" target="_blank" style="color:var(--accent-2)">${esc(chat.item_title)}</a>` : esc(chat.item_title)}</span>
           </div>
         </div>` : ""}
       <div class="messages" id="msgList">
@@ -414,29 +474,29 @@ async function renderChatDetail(params) {
           // didn't give us.
           const photo = m.image_url
             ? `<img class="msg-photo" src="${escAttr(m.image_url)}" alt="Фото" loading="lazy">`
-            : (m.has_image ? "📷 Фото" : "");
+            : (m.has_image ? `<span class="msg-att">${ICONS.camera}Фото</span>` : "");
           // A bubble with neither text nor a picture is an attachment type
           // the parser didn't recognise — say so rather than rendering an
           // empty bubble (that blankness is what hid unparsed voice
           // messages until now).
-          const body = esc(m.text) || (photo ? "" : "📎 Вложение");
+          const body = esc(m.text) || (photo ? "" : `<span class="msg-att">${ICONS.clip}Вложение</span>`);
           return `<div class="msg ${m.direction}">${photo}${photo && body ? "<br>" : ""}${body}</div>`;
         }).join("")}
       </div>
       <div id="sentBanner"></div>
       <div class="chat-actions">
-        <button class="btn secondary small" id="markReadBtn">✅ Прочитано</button>
-        <button class="btn secondary small" id="refreshBtn">🔄 Обновить</button>
-        <button class="btn secondary small" id="aiBtn">🧠 ИИ-ответ</button>
-        <button class="btn secondary small" id="tplBtn">📋 Шаблоны</button>
+        <button class="btn secondary small" id="markReadBtn">${ICONS.check} Прочитано</button>
+        <button class="btn secondary small" id="refreshBtn">${ICONS.refresh} Обновить</button>
+        <button class="btn secondary small" id="aiBtn">${ICONS.ai} ИИ-ответ</button>
+        <button class="btn secondary small" id="tplBtn">${ICONS.doc} Шаблоны</button>
       </div>
       <div id="assistPanel"></div>
       <div id="warnBanner"></div>
       <div class="reply-bar">
         <input type="file" id="photoInput" accept="image/*" multiple hidden>
-        <button class="icon-btn" id="photoBtn" style="background:var(--card-bg);border:1px solid var(--card-border)">📷</button>
+        <button class="icon-btn" id="photoBtn" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--text)">${ICONS.camera}</button>
         <textarea id="replyText" rows="1" placeholder="Ответ клиенту…"></textarea>
-        <button class="icon-btn" id="sendBtn">➤</button>
+        <button class="icon-btn" id="sendBtn">${ICONS.send}</button>
       </div>
     `;
 
@@ -508,7 +568,7 @@ async function renderChatDetail(params) {
           return;
         }
         panel.innerHTML = `<div class="card" style="gap:8px">` + data.templates.map(t =>
-          `<button class="list-btn" data-tpl="${t.id}">${t.kind === "ai_prompt" ? "🧠" : "📝"} ${esc(t.title)}</button>`
+          `<button class="list-btn" data-tpl="${t.id}"><span class="name">${t.kind === "ai_prompt" ? ICONS.ai : ICONS.doc}${esc(t.title)}</span></button>`
         ).join("") + `</div>`;
         panel.querySelectorAll("[data-tpl]").forEach(btn => {
           btn.addEventListener("click", async () => {
@@ -541,7 +601,7 @@ async function renderChatDetail(params) {
         for (let i = 0; i < res.sent_count; i++) {
           const bubble = document.createElement("div");
           bubble.className = "msg out";
-          bubble.textContent = "📷 Фото";
+          bubble.innerHTML = `<span class="msg-att">${ICONS.camera}Фото</span>`;
           msgList.appendChild(bubble);
         }
         msgList.scrollTop = msgList.scrollHeight;
@@ -560,7 +620,7 @@ async function renderChatDetail(params) {
       banner.innerHTML = `
         <div class="card card-row" style="font-size:12.5px">
           <span>${label}</span>
-          <button class="btn secondary small" id="deleteSentBtn">🗑 Удалить</button>
+          <button class="btn secondary small" id="deleteSentBtn">${ICONS.trash} Удалить</button>
         </div>
       `;
       document.getElementById("deleteSentBtn").addEventListener("click", async () => {
@@ -706,12 +766,12 @@ async function renderOrderDetail(params) {
       </div>
 
       <div class="chat-actions">
-        ${actionBtn("confirm", "✅ Подтвердить")}
-        ${actionBtn("reject", "❌ Отменить", "secondary")}
-        ${actionBtn("setMarkings", "🏷 Маркировка", "secondary")}
-        ${actionBtn("setCNCDetails", "📍 Подготовить самовывоз", "secondary")}
-        ${order.delivery_type === "pvz" ? '<button class="btn secondary small" data-action="checkConfirmationCode">✅ Код получения</button>' : ""}
-        ${order.chat_short_id ? `<button class="btn secondary small" id="orderChatBtn">💬 Чат с покупателем</button>` : ""}
+        ${actionBtn("confirm", `${ICONS.check} Подтвердить`)}
+        ${actionBtn("reject", `${ICONS.x} Отменить`, "secondary")}
+        ${actionBtn("setMarkings", `${ICONS.tag} Маркировка`, "secondary")}
+        ${actionBtn("setCNCDetails", `${ICONS.pin} Подготовить самовывоз`, "secondary")}
+        ${order.delivery_type === "pvz" ? '<button class="btn secondary small" data-action="checkConfirmationCode">${ICONS.check} Код получения</button>' : ""}
+        ${order.chat_short_id ? `<button class="btn secondary small" id="orderChatBtn">${ICONS.chat} Чат с покупателем</button>` : ""}
       </div>
       <div id="orderActionForm"></div>
     `;
@@ -825,10 +885,10 @@ async function renderProfile() {
       <div class="card">
         <div style="font-size:16px;font-weight:700">${esc(p.full_name)}</div>
         <div style="color:var(--text-dim);font-size:13px">${esc(p.role_label)}</div>
-        ${p.points.length ? `<div style="font-size:13px">📍 ${esc(p.points.join(", "))}</div>` : ""}
-        <div style="font-size:13px">${p.on_shift ? "💼 На смене" : "🛌 Отдыхает"}</div>
+        ${p.points.length ? `<div class="card-row" style="font-size:13px;justify-content:flex-start;gap:8px">${ICONS.pin}<span>${esc(p.points.join(", "))}</span></div>` : ""}
+        <div class="card-row" style="font-size:13px;justify-content:flex-start;gap:8px">${p.on_shift ? ICONS.briefcase : ICONS.moon}<span>${p.on_shift ? "На смене" : "Отдыхает"}</span></div>
         <div class="card-row" style="margin-top:8px">
-          <span>⭐ Рейтинг</span><span style="font-weight:700">${p.rating_points}</span>
+          <span>Рейтинг</span><span style="font-weight:700">${p.rating_points}</span>
         </div>
       </div>
       <div class="section-title">Общий рейтинг</div>
@@ -874,7 +934,7 @@ async function renderMyTemplates() {
         : (state.templatePointId ? `#${state.templatePointId}` : "не выбрана");
       pointBar = `
         <div class="card card-row">
-          <span>🏢 Точка: <b>${label}</b></span>
+          <span>Точка: <b>${label}</b></span>
           <button class="btn secondary small" id="tplPickPoint">Выбрать</button>
         </div>
         <div id="tplPointPicker"></div>`;
@@ -887,20 +947,20 @@ async function renderMyTemplates() {
       <div class="card field">
         <label>Тип</label>
         <select id="newTplKind" style="border-radius:14px;border:1px solid var(--card-border);background:rgba(255,255,255,0.06);color:var(--text);padding:11px 13px;font-size:14px">
-          <option value="text">📝 Текст</option>
-          <option value="ai_prompt">🧠 AI-промпт</option>
+          <option value="text">Текст</option>
+          <option value="ai_prompt">AI-промпт</option>
         </select>
         <label>Заголовок</label>
         <input type="text" id="newTplTitle" placeholder="Например: Часы работы">
         <label>Текст / промпт</label>
         <input type="text" id="newTplBody" placeholder="!КОДВ — часы, !КОДА — адрес">
-        <button class="btn block" id="newTplSubmit">➕ Создать шаблон</button>
+        <button class="btn block" id="newTplSubmit">${ICONS.plus} Создать шаблон</button>
       </div>` : '<div class="empty-state">Выберите точку, чтобы добавить шаблон</div>'}
       <div class="section-title">Существующие</div>
       ${data.templates.length ? data.templates.map(t => `
         <div class="card card-row">
-          <span>${t.kind === "ai_prompt" ? "🧠" : "📝"} ${esc(t.title)}</span>
-          <button class="btn secondary small" data-del="${t.id}">🗑</button>
+          <span class="name">${t.kind === "ai_prompt" ? ICONS.ai : ICONS.doc}${esc(t.title)}</span>
+          <button class="btn secondary small" data-del="${t.id}">${ICONS.trash}</button>
         </div>
       `).join("") : '<div class="empty-state">Шаблонов пока нет</div>'}
     `;
@@ -950,36 +1010,91 @@ async function renderMyTemplates() {
 // Admin panel
 // ============================================================================
 
-SCREENS.adminHome = renderAdminHome;
-async function renderAdminHome() {
-  setHeader("Админ-панель", "", true);
-  // Leadership work (РОП and up) vs. system settings (director only). The
-  // server enforces the same split — see _require_director in webapp.py;
-  // this list only decides what's worth showing.
-  const sections = [
-    ["adminUsers", "👥", "Все пользователи"],
-    ["adminOnshift", "🕐", "Кто на смене"],
-    ["adminRequests", "📋", "Заявки на вступление"],
-    ["adminReviews", "⭐", "Отзывы Avito"],
-    ["adminBroadcast", "📢", "Сообщение всем"],
-  ];
-  if (state.me && state.me.is_director) {
-    sections.push(
-      ["adminPoints", "🏢", "Точки"],
-      ["adminAvito", "🔑", "Avito API"],
-      ["adminAI", "🧠", "Настройки ИИ"],
-      ["adminProxy", "🌐", "Прокси"],
-      ["adminPayment", "⭐", "Платный доступ"],
-      ["adminWelcome", "✉️", "Приветственное сообщение"],
-      ["adminBackup", "💾", "Резервные копии"],
-    );
-  }
+function renderMenuScreen(sections) {
   screenRoot.innerHTML = sections.map(([screen, icon, label]) =>
-    `<button class="list-btn" data-go="${screen}"><span class="name">${icon} ${label}</span></button>`
+    `<button class="list-btn" data-go="${screen}"><span class="name">${ICONS[icon]}${esc(label)}</span></button>`
   ).join("");
   screenRoot.querySelectorAll("[data-go]").forEach(btn => {
     btn.addEventListener("click", () => go(btn.dataset.go, {}));
   });
+}
+
+// Leadership work (РОП and up) and system settings (director only) are two
+// separate menus in the bot, and they are two separate screens here for the
+// same reason: the settings screens hold Avito keys, the AI key, proxy
+// credentials and full-database backups, and mixing them into one list that
+// merely hides rows invites reaching the wrong one. The server enforces the
+// same split independently — see _require_director in webapp.py.
+SCREENS.leadershipHome = renderLeadershipHome;
+async function renderLeadershipHome() {
+  setHeader("Меню руководителя", state.me ? state.me.role_label : "", true);
+  renderMenuScreen([
+    ["adminUsers", "users", "Все пользователи"],
+    ["adminOnshift", "clock", "Кто на смене"],
+    ["adminRequests", "doc", "Заявки на вступление"],
+    ["adminUnassigned", "pinOff", "Чаты без точки"],
+    ["adminReviews", "star", "Отзывы Avito"],
+    ["adminBroadcast", "megaphone", "Сообщение всем"],
+  ]);
+}
+
+SCREENS.adminHome = renderAdminHome;
+async function renderAdminHome() {
+  setHeader("Настройки", "", true);
+  renderMenuScreen([
+    ["adminPoints", "building", "Точки"],
+    ["adminAvito", "key", "Avito API"],
+    ["adminAI", "ai", "Настройки ИИ"],
+    ["adminProxy", "globe", "Прокси"],
+    ["adminPayment", "star", "Платный доступ"],
+    ["adminWelcome", "mail", "Приветственное сообщение"],
+    ["adminBackup", "save", "Резервные копии"],
+  ]);
+}
+
+// Chats Avito gave us no branch for. The API has always allowed any РОП to
+// sort these out, but the only way in was a button inside the Точки screen,
+// which is director-only — so in practice a РОП could not reach their own
+// queue. It lives in the leadership menu now, like it does in the bot.
+SCREENS.adminUnassigned = renderAdminUnassigned;
+async function renderAdminUnassigned() {
+  setHeader("Чаты без точки", "", true);
+  loading();
+  try {
+    const [res, pointsData] = await Promise.all([
+      apiGet("/admin/points/unassigned"),
+      apiGet("/admin/points"),
+    ]);
+    if (!res.chats.length) {
+      screenRoot.innerHTML = '<div class="empty-state">Все чаты привязаны к точкам.</div>';
+      return;
+    }
+    const points = pointsData.points.filter(p => p.is_active);
+    screenRoot.innerHTML = `
+      <div class="section-title">Не удалось определить точку: ${res.chats.length}</div>
+      ${res.chats.map(c => `
+        <button class="list-btn" data-chat="${escAttr(c.short_id)}">
+          <span class="name">${ICONS.pinOff}${esc(c.client_name || "Клиент")}</span>
+          ${c.item_id ? `<div class="preview">Объявление ${esc(c.item_id)}</div>` : ""}
+        </button>
+        <div id="reassignBox-${escAttr(c.short_id)}"></div>
+      `).join("")}
+    `;
+    screenRoot.querySelectorAll("[data-chat]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const box = document.getElementById(`reassignBox-${btn.dataset.chat}`);
+        const pid = await pickPointInline(points, box);
+        if (pid == null) return;
+        try {
+          await apiPost("/admin/points/reassign", { chat_short_id: btn.dataset.chat, point_id: pid });
+          toast("Переназначено");
+          renderAdminUnassigned();
+        } catch (err) { toast("Ошибка: " + err.message); }
+      });
+    });
+  } catch (err) {
+    renderError(err, renderAdminUnassigned);
+  }
 }
 
 // --- Users --------------------------------------------------------------
@@ -994,7 +1109,7 @@ async function renderAdminUsers() {
       <button class="list-btn" data-id="${u.telegram_id}">
         <div class="row-top">
           <span class="name">${esc(u.full_name || u.username || u.telegram_id)}</span>
-          <span class="preview">${u.status !== "approved" ? "⛔" : ""}</span>
+          <span class="preview">${u.status !== "approved" ? "заблокирован" : ""}</span>
         </div>
         <div class="preview">${esc(u.role_label)}${u.trade_point_name ? " · " + esc(u.trade_point_name) : ""}</div>
       </button>
@@ -1033,7 +1148,7 @@ async function renderAdminUserEdit(params) {
         <input type="text" id="editFullName" value="${esc(user.full_name || "")}">
         <label>Торговая точка (свободный текст)</label>
         <input type="text" id="editTradePoint" value="${esc(user.trade_point_name || "")}">
-        <button class="btn block small" id="saveNameBtn">💾 Сохранить</button>
+        <button class="btn block small" id="saveNameBtn">${ICONS.save} Сохранить</button>
       </div>
 
       <div class="section-title">Роль</div>
@@ -1048,9 +1163,9 @@ async function renderAdminUserEdit(params) {
       <div class="section-title">Действия</div>
       <div class="chat-actions">
         ${user.status === "blocked"
-          ? '<button class="btn small" id="unblockBtn">🔓 Разблокировать</button>'
-          : '<button class="btn secondary small" id="blockBtn">🚫 Уволить</button>'}
-        <button class="btn secondary small" id="deleteBtn" style="border-color:var(--danger)">🗑 Удалить аккаунт</button>
+          ? `<button class="btn small" id="unblockBtn">${ICONS.unlock} Разблокировать</button>`
+          : `<button class="btn secondary small" id="blockBtn">${ICONS.ban} Уволить</button>`}
+        <button class="btn secondary small" id="deleteBtn" style="border-color:var(--danger)">${ICONS.trash} Удалить аккаунт</button>
       </div>
     `;
 
@@ -1060,7 +1175,7 @@ async function renderAdminUserEdit(params) {
         <span>${esc(p.name)}</span>
         <input type="checkbox" data-point-check="${p.id}" ${subscribedIds.has(p.id) ? "checked" : ""}>
       </label>
-    `).join("") + '<button class="btn block small" id="savePointsBtn" style="margin-top:8px">💾 Сохранить подписки</button>';
+    `).join("") + '<button class="btn block small" id="savePointsBtn" style="margin-top:8px">${ICONS.save} Сохранить подписки</button>';
 
     document.getElementById("savePointsBtn").addEventListener("click", async () => {
       const ids = Array.from(pointsBox.querySelectorAll("[data-point-check]:checked")).map(cb => Number(cb.dataset.pointCheck));
@@ -1136,7 +1251,7 @@ function pickPointInline(points, containerEl) {
           ${points.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}
         </select>
         <div class="chat-actions">
-          <button class="btn small" id="pointPickerOk">✅ Готово</button>
+          <button class="btn small" id="pointPickerOk">${ICONS.check} Готово</button>
           <button class="btn secondary small" id="pointPickerCancel">Отмена</button>
         </div>
       </div>
@@ -1163,7 +1278,7 @@ async function renderAdminOnshift() {
     const data = await apiGet("/admin/onshift");
     screenRoot.innerHTML = data.users.length ? data.users.map(u => `
       <div class="card card-row">
-        <span>👤 ${esc(u.full_name || u.username || u.telegram_id)}</span>
+        <span class="name">${ICONS.user}${esc(u.full_name || u.username || u.telegram_id)}</span>
         <span class="preview">${esc(u.role_label)} · ${esc(u.point_label)}</span>
       </div>
     `).join("") : '<div class="empty-state">Сейчас никто не на смене</div>';
@@ -1186,9 +1301,9 @@ async function renderAdminRequests() {
         <div style="font-weight:700">${esc(u.full_name || u.username || u.telegram_id)}</div>
         ${u.trade_point_name ? `<div class="preview">ТТ: ${esc(u.trade_point_name)}</div>` : ""}
         <div class="chat-actions" style="margin-top:8px">
-          <button class="btn small" data-approve="${u.telegram_id}">✅ Одобрить</button>
-          <button class="btn secondary small" data-reject="${u.telegram_id}">❌ Отклонить</button>
-          ${u.has_unrefunded_payment ? `<button class="btn secondary small" data-reject-refund="${u.telegram_id}">💸 С возвратом</button>` : ""}
+          <button class="btn small" data-approve="${u.telegram_id}">${ICONS.check} Одобрить</button>
+          <button class="btn secondary small" data-reject="${u.telegram_id}">${ICONS.x} Отклонить</button>
+          ${u.has_unrefunded_payment ? `<button class="btn secondary small" data-reject-refund="${u.telegram_id}">${ICONS.refund} С возвратом</button>` : ""}
         </div>
       </div>
     `).join("");
@@ -1234,16 +1349,15 @@ async function renderAdminPoints() {
     const data = await apiGet("/admin/points");
     screenRoot.innerHTML = `
       <div class="chat-actions">
-        <button class="btn secondary small" id="syncBtn">🗺 Синк с Avito</button>
-        <button class="btn secondary small" id="conflictsBtn">🔍 Проверка близких точек</button>
-        <button class="btn secondary small" id="unassignedBtn">📭 Чаты без точки</button>
-        <button class="btn secondary small" id="bulkBtn">📥 Массовый импорт</button>
+        <button class="btn secondary small" id="syncBtn">${ICONS.map} Синк с Avito</button>
+        <button class="btn secondary small" id="conflictsBtn">${ICONS.search} Проверка близких точек</button>
+        <button class="btn secondary small" id="bulkBtn">${ICONS.download} Массовый импорт</button>
       </div>
       <div id="pointsReport"></div>
       ${data.points.map(p => `
         <button class="list-btn" data-point="${p.id}">
           <div class="row-top">
-            <span class="name">${p.is_active ? "🟢" : "🔴"} ${esc(p.name)}</span>
+            <span class="name">${dot(p.is_active)}${esc(p.name)}</span>
           </div>
           ${p.address ? `<div class="preview">${esc(p.address)}</div>` : ""}
         </button>
@@ -1268,30 +1382,6 @@ async function renderAdminPoints() {
         report.innerHTML = res.conflicts.length
           ? `<div class="card" style="font-size:12.5px">` + res.conflicts.map(c => `⚠️ «${esc(c.point_a)}» ↔ «${esc(c.point_b)}»: ${c.distance_m} м`).join("<br>") + `</div>`
           : `<div class="card" style="font-size:12.5px">Близких точек не найдено.</div>`;
-      } catch (err) { toast("Ошибка: " + err.message); }
-    });
-    document.getElementById("unassignedBtn").addEventListener("click", async () => {
-      const report = document.getElementById("pointsReport");
-      report.innerHTML = '<div class="spinner"></div>';
-      try {
-        const res = await apiGet("/admin/points/unassigned");
-        if (!res.chats.length) { report.innerHTML = '<div class="card" style="font-size:12.5px">Все чаты привязаны.</div>'; return; }
-        report.innerHTML = res.chats.map(c => `
-          <button class="list-btn" data-chat="${c.short_id}"><span class="name">📭 ${esc(c.client_name || "Клиент")}</span></button>
-          <div id="reassignBox-${c.short_id}"></div>
-        `).join("");
-        report.querySelectorAll("[data-chat]").forEach(btn => {
-          btn.addEventListener("click", async () => {
-            const box = document.getElementById(`reassignBox-${btn.dataset.chat}`);
-            const pid = await pickPointInline(data.points.filter(p => p.is_active), box);
-            if (pid == null) return;
-            try {
-              await apiPost("/admin/points/reassign", { chat_short_id: btn.dataset.chat, point_id: pid });
-              toast("✅ Переназначено");
-              renderAdminPoints();
-            } catch (err) { toast("Ошибка: " + err.message); }
-          });
-        });
       } catch (err) { toast("Ошибка: " + err.message); }
     });
     document.getElementById("bulkBtn").addEventListener("click", () => {
@@ -1334,10 +1424,10 @@ async function renderAdminPointEdit(params) {
         <input type="text" id="ptAddress" value="${esc(point.address || "")}">
         <label>Часы работы</label>
         <input type="text" id="ptHours" value="${esc(point.working_hours || "")}">
-        <button class="btn block small" id="ptSave">💾 Сохранить</button>
+        <button class="btn block small" id="ptSave">${ICONS.save} Сохранить</button>
       </div>
       <button class="btn ${point.is_active ? "secondary" : ""} block small" id="ptToggle" style="${point.is_active ? "border-color:var(--danger)" : ""}">
-        ${point.is_active ? "🔴 Удалить (скрыть)" : "🟢 Активировать"}
+        ${point.is_active ? "Удалить (скрыть)" : "Активировать"}
       </button>
     `;
     document.getElementById("ptSave").addEventListener("click", async () => {
@@ -1373,7 +1463,7 @@ async function renderAdminAvito() {
     screenRoot.innerHTML = `
       ${data.accounts.map(a => `
         <div class="card card-row">
-          <span>${a.is_active ? "🟢" : "🔴"} ${esc(a.name)}${a.last_poll_error ? " ⚠️" : ""}</span>
+          <span class="name">${dot(a.is_active)}${esc(a.name)}${a.last_poll_error ? " ⚠️" : ""}</span>
           <button class="btn secondary small" data-toggle="${a.id}">${a.is_active ? "Выключить" : "Включить"}</button>
         </div>
       `).join("")}
@@ -1384,7 +1474,7 @@ async function renderAdminAvito() {
         <input type="text" id="accClientId">
         <label>client_secret</label>
         <input type="text" id="accClientSecret">
-        <button class="btn block small" id="accSubmit">➕ Добавить аккаунт</button>
+        <button class="btn block small" id="accSubmit">${ICONS.plus} Добавить аккаунт</button>
       </div>
     `;
     screenRoot.querySelectorAll("[data-toggle]").forEach(btn => {
@@ -1427,9 +1517,9 @@ async function renderAdminAI() {
         <input type="text" id="aiModel" value="${esc(cfg.model)}">
         <label>api_key ${cfg.has_api_key ? "(установлен, оставьте пустым чтобы не менять)" : "(не задан)"}</label>
         <input type="text" id="aiApiKey" placeholder="sk-...">
-        <button class="btn block small" id="aiSave">💾 Сохранить</button>
+        <button class="btn block small" id="aiSave">${ICONS.save} Сохранить</button>
       </div>
-      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="aiToggle">${cfg.is_enabled ? "🔴 Выключить" : "🟢 Включить"}</button>
+      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="aiToggle">${cfg.is_enabled ? "Выключить" : "Включить"}</button>
     `;
     document.getElementById("aiSave").addEventListener("click", async () => {
       const body = { base_url: document.getElementById("aiBaseUrl").value, model: document.getElementById("aiModel").value };
@@ -1466,9 +1556,9 @@ async function renderAdminProxy() {
       <div class="card field">
         <label>URL (http://... или socks5://...)</label>
         <input type="text" id="proxyUrl" value="${esc(cfg.proxy_url || "")}">
-        <button class="btn block small" id="proxySave">💾 Сохранить и перезапустить</button>
+        <button class="btn block small" id="proxySave">${ICONS.save} Сохранить и перезапустить</button>
       </div>
-      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="proxyToggle">${cfg.is_enabled ? "🔴 Выключить" : "🟢 Включить"}</button>
+      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="proxyToggle">${cfg.is_enabled ? "Выключить" : "Включить"}</button>
     `;
     document.getElementById("proxySave").addEventListener("click", async () => {
       try {
@@ -1497,11 +1587,11 @@ async function renderAdminPayment() {
     const cfg = await apiGet("/admin/payment-config");
     screenRoot.innerHTML = `
       <div class="card field">
-        <label>Сумма (⭐ Stars)</label>
+        <label>Сумма (Stars)</label>
         <input type="number" id="paymentAmount" value="${cfg.amount_stars}">
-        <button class="btn block small" id="paymentSave">💾 Сохранить сумму</button>
+        <button class="btn block small" id="paymentSave">${ICONS.save} Сохранить сумму</button>
       </div>
-      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="paymentToggle">${cfg.is_enabled ? "🔴 Выключить" : "🟢 Включить"}</button>
+      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="paymentToggle">${cfg.is_enabled ? "Выключить" : "Включить"}</button>
     `;
     document.getElementById("paymentSave").addEventListener("click", async () => {
       try {
@@ -1530,7 +1620,7 @@ async function renderAdminWelcome() {
       <div class="card field">
         <label>Текст</label>
         <textarea id="welcomeText" rows="5">${esc(data.text)}</textarea>
-        <button class="btn block small" id="welcomeSave">💾 Сохранить</button>
+        <button class="btn block small" id="welcomeSave">${ICONS.save} Сохранить</button>
       </div>
     `;
     document.getElementById("welcomeSave").addEventListener("click", async () => {
@@ -1557,10 +1647,10 @@ async function renderAdminBackup() {
       <div class="card field">
         <label>Периодичность (часы)</label>
         <input type="number" id="backupInterval" value="${cfg.interval_hours}">
-        <button class="btn block small" id="backupIntervalSave">💾 Сохранить</button>
+        <button class="btn block small" id="backupIntervalSave">${ICONS.save} Сохранить</button>
       </div>
-      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="backupToggle">${cfg.is_enabled ? "🔴 Выключить" : "🟢 Включить"}</button>
-      <button class="btn block small" id="backupNow">📤 Сделать бэкап сейчас</button>
+      <button class="btn ${cfg.is_enabled ? "secondary" : ""} block small" id="backupToggle">${cfg.is_enabled ? "Выключить" : "Включить"}</button>
+      <button class="btn block small" id="backupNow">${ICONS.upload} Сделать бэкап сейчас</button>
     `;
     document.getElementById("backupIntervalSave").addEventListener("click", async () => {
       try {
@@ -1601,12 +1691,12 @@ async function renderAdminReviews() {
     const data = await apiGet("/admin/reviews");
     screenRoot.innerHTML = `
       <div class="card card-row">
-        <span>⭐ Рейтинг</span><span>${data.score ?? "—"} (${data.reviews_count} отзывов)</span>
+        <span>Рейтинг</span><span>${data.score ?? "—"} (${data.reviews_count} отзывов)</span>
       </div>
       ${data.reviews.map(r => `
         <div class="card">
-          <div class="card-row"><span>${esc(r.sender_name)}</span><span>${"⭐".repeat(r.score)}</span></div>
-          ${r.item_title ? `<div class="preview">📦 ${esc(r.item_title)}</div>` : ""}
+          <div class="card-row"><span>${esc(r.sender_name)}</span><span class="stars">${ICONS.star.repeat(r.score)}</span></div>
+          ${r.item_title ? `<div class="preview">${esc(r.item_title)}</div>` : ""}
           <div style="font-size:13px">${esc(r.text)}</div>
           ${r.answer ? `<div class="preview">↳ Ваш ответ: ${esc(r.answer)}</div>` : (r.can_answer ? `<button class="btn secondary small" data-answer="${r.id}" style="margin-top:8px">✍️ Ответить</button><div id="ansForm-${r.id}"></div>` : "")}
         </div>
@@ -1648,7 +1738,7 @@ async function renderAdminBroadcast() {
       <textarea id="bcText" rows="5" placeholder="Текст сообщения…"></textarea>
       <label>Фото (необязательно)</label>
       <input type="file" id="bcPhoto" accept="image/*">
-      <button class="btn block" id="bcSend">📢 Отправить всем</button>
+      <button class="btn block" id="bcSend">${ICONS.megaphone} Отправить всем</button>
     </div>
   `;
   document.getElementById("bcSend").addEventListener("click", async (e) => {
