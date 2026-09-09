@@ -468,20 +468,33 @@ async function renderChatDetail(params) {
           </div>
         </div>` : ""}
       <div class="messages" id="msgList">
-        ${chat.messages.map(m => {
-          // A photo the client sent renders as the picture itself; the
-          // "📷 Фото" placeholder is only for images whose URL Avito
-          // didn't give us.
-          const photo = m.image_url
-            ? `<img class="msg-photo" src="${escAttr(m.image_url)}" alt="Фото" loading="lazy">`
-            : (m.has_image ? `<span class="msg-att">${ICONS.camera}Фото</span>` : "");
-          // A bubble with neither text nor a picture is an attachment type
-          // the parser didn't recognise — say so rather than rendering an
-          // empty bubble (that blankness is what hid unparsed voice
-          // messages until now).
-          const body = esc(m.text) || (photo ? "" : `<span class="msg-att">${ICONS.clip}Вложение</span>`);
-          return `<div class="msg ${m.direction}">${photo}${photo && body ? "<br>" : ""}${body}</div>`;
-        }).join("")}
+        ${(() => {
+          // Day is printed once, as a separator, when it changes — a time
+          // alone cannot tell "16:20 today" from "16:20 last week", which
+          // is the whole point of showing it. Both labels come ready-made
+          // from the server in Moscow time (see _serialize_message).
+          let lastDay = null;
+          return chat.messages.map(m => {
+            let sep = "";
+            if (m.day_label && m.day_label !== lastDay) {
+              lastDay = m.day_label;
+              sep = `<div class="day-sep"><span>${esc(m.day_label)}</span></div>`;
+            }
+            // A photo the client sent renders as the picture itself; the
+            // "Фото" placeholder is only for images whose URL Avito
+            // didn't give us.
+            const photo = m.image_url
+              ? `<img class="msg-photo" src="${escAttr(m.image_url)}" alt="Фото" loading="lazy">`
+              : (m.has_image ? `<span class="msg-att">${ICONS.camera}Фото</span>` : "");
+            // A bubble with neither text nor a picture is an attachment type
+            // the parser didn't recognise — say so rather than rendering an
+            // empty bubble (that blankness is what hid unparsed voice
+            // messages until now).
+            const body = esc(m.text) || (photo ? "" : `<span class="msg-att">${ICONS.clip}Вложение</span>`);
+            const time = m.time_label ? `<span class="msg-time">${esc(m.time_label)}</span>` : "";
+            return `${sep}<div class="msg ${m.direction}">${photo}${photo && body ? "<br>" : ""}${body}${time}</div>`;
+          }).join("");
+        })()}
       </div>
       <div id="sentBanner"></div>
       <div class="chat-actions">
@@ -601,7 +614,8 @@ async function renderChatDetail(params) {
         for (let i = 0; i < res.sent_count; i++) {
           const bubble = document.createElement("div");
           bubble.className = "msg out";
-          bubble.innerHTML = `<span class="msg-att">${ICONS.camera}Фото</span>`;
+          bubble.innerHTML = `<span class="msg-att">${ICONS.camera}Фото</span>`
+            + (res.time_label ? `<span class="msg-time">${esc(res.time_label)}</span>` : "");
           msgList.appendChild(bubble);
         }
         msgList.scrollTop = msgList.scrollHeight;
@@ -643,6 +657,12 @@ async function renderChatDetail(params) {
         const bubble = document.createElement("div");
         bubble.className = "msg out";
         bubble.textContent = text;
+        if (res.time_label) {
+          const t = document.createElement("span");
+          t.className = "msg-time";
+          t.textContent = res.time_label;
+          bubble.appendChild(t);
+        }
         msgList.appendChild(bubble);
         msgList.scrollTop = msgList.scrollHeight;
         showSentBanner(res.msg_ref, "✅ Отправлено");

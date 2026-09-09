@@ -207,6 +207,14 @@ def _serialize_message(m: bot_cache.CachedMessage) -> dict:
         "has_image": m.has_image,
         "image_url": m.image_url,
         "created_at": m.created_at.isoformat(),
+        # Rendered here rather than in the browser on purpose. The stored
+        # timestamps are naive UTC, so new Date() on that string reads them
+        # as the device's own local time — three hours off for everyone on
+        # Moscow time, and differently wrong for a phone set to another
+        # zone. The whole project already fixes on UTC+3 (utils.format_msk),
+        # so the server is the one place that knows the answer.
+        "time_label": utils.to_msk(m.created_at).strftime("%H:%M"),
+        "day_label": utils.msk_day_label(m.created_at),
     }
 
 
@@ -408,7 +416,16 @@ async def api_chat_reply(request: web.Request) -> web.Response:
     except avito_client.AvitoAPIError:
         pass
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, sent.message_id or "")
-    return web.json_response({"ok": True, "msg_ref": msg_ref})
+    # The frontend appends the sent bubble immediately, before any refresh.
+    # Its timestamp comes from here rather than from the device clock, for
+    # the same reason as _serialize_message: a phone on another timezone
+    # would label it hours away from the messages around it.
+    now = datetime.utcnow()
+    return web.json_response({
+        "ok": True, "msg_ref": msg_ref,
+        "time_label": utils.to_msk(now).strftime("%H:%M"),
+        "day_label": utils.msk_day_label(now),
+    })
 
 
 async def api_chat_reply_photo(request: web.Request) -> web.Response:
@@ -471,7 +488,12 @@ async def api_chat_reply_photo(request: web.Request) -> web.Response:
     except avito_client.AvitoAPIError:
         pass
     msg_ref = await bot_cache.register_sent_message(chat.chat_id, last_avito_message_id)
-    return web.json_response({"ok": True, "sent_count": sent_count, "msg_ref": msg_ref})
+    now = datetime.utcnow()
+    return web.json_response({
+        "ok": True, "sent_count": sent_count, "msg_ref": msg_ref,
+        "time_label": utils.to_msk(now).strftime("%H:%M"),
+        "day_label": utils.msk_day_label(now),
+    })
 
 
 async def api_message_delete(request: web.Request) -> web.Response:

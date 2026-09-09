@@ -35,6 +35,22 @@ def parse_utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
 
 
+def to_msk(dt_utc: datetime) -> datetime:
+    """Shift a naive UTC datetime into Moscow time (fixed UTC+3, no DST)."""
+    return dt_utc + timedelta(hours=MSK_OFFSET_HOURS)
+
+
+def msk_day_label(dt_utc: datetime) -> str:
+    """«Сегодня» / «Вчера» / «12.09.2026» for a naive UTC timestamp."""
+    msk = to_msk(dt_utc)
+    days = (to_msk(datetime.utcnow()).date() - msk.date()).days
+    if days == 0:
+        return "Сегодня"
+    if days == 1:
+        return "Вчера"
+    return msk.strftime("%d.%m.%Y")
+
+
 def format_msk(iso_utc: str, fmt: str = "%d.%m %H:%M") -> str:
     """Render a stored UTC timestamp string in Moscow time (fixed UTC+3)."""
     dt_utc = parse_utc(iso_utc)

@@ -98,7 +98,17 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
     elif chat.item_title:
         lines.append(f"📦 {html.escape(chat.item_title)}")
     lines.append("")
+    last_day: str | None = None
     for m in list(chat.messages)[-30:]:
+        # Same reasoning as the Mini App: a bare time cannot tell "16:20
+        # today" from "16:20 last week". The day is printed once, when it
+        # changes, and every line carries its time — both in Moscow time,
+        # since the stored timestamps are UTC.
+        day = utils.msk_day_label(m.created_at)
+        if day != last_day:
+            last_day = day
+            lines.append(f"<i>— {day} —</i>")
+        stamp = f"<code>{utils.to_msk(m.created_at).strftime('%H:%M')}</code>"
         speaker = f"👤 <b>{client_name}</b>" if m.direction == "in" else "🧑‍💼 <b>Я</b>"
         if m.text:
             text = html.escape(m.text)
@@ -111,7 +121,7 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
             # Never claim "фото" for anything text-less — that's how voice
             # messages ended up labelled as photos.
             text = "📷 Фото" if m.has_image else "📎 Вложение"
-        lines.append(f"{speaker}: {text}")
+        lines.append(f"{stamp} {speaker}: {text}")
     if not chat.messages:
         lines.append("(сообщений пока нет)")
 
