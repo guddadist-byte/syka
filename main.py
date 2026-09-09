@@ -65,6 +65,10 @@ async def main() -> None:
         dp.include_router(handlers.template_router)
         dp.include_router(handlers.admin_router)
         dp.include_router(handlers.settings_router)
+        # Last on purpose: it answers only what no other router claimed, so
+        # a message sent into a form that is no longer open gets a reply
+        # instead of vanishing. Anything registered after it would be dead.
+        dp.include_router(handlers.fallback_router)
 
         avito_session = aiohttp.ClientSession()
         web_runner: web.AppRunner | None = None

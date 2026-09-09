@@ -2402,3 +2402,39 @@ async def receive_order_confirm_code(message: Message, state: FSMContext) -> Non
     await message.answer("✅ Код подтверждён, заказ можно выдавать.")
     if order_id is not None and account_id is not None:
         await _show_order_detail(message, order_id, account_id)
+
+
+# ============================================================================
+# Fallback: text nobody was waiting for
+# ============================================================================
+#
+# Registered last of all routers (see main.py), so it only ever sees what
+# nothing else matched. Until this existed such a message was swallowed in
+# complete silence — and that is not a rare corner: every admin form lives
+# in an FSM state, MemoryStorage keeps those inside the process, and every
+# restart (i.e. every deploy) drops them. Press «Изменить», have the bot
+# restart underneath you, send your new text — the bot said nothing at all,
+# and there was no way to tell "not saved" from "saved without a reply".
+
+fallback_router = Router(name="fallback")
+
+
+@fallback_router.message(F.text | F.photo)
+async def unexpected_input(message: Message) -> None:
+    user = await database.get_user(message.from_user.id)
+    if user is None:
+        await message.answer("Отправьте /start, чтобы подать заявку на доступ.")
+        return
+    if user.status == constants.STATUS_BLOCKED:
+        await message.answer("Ваш доступ заблокирован. Обратитесь к руководителю.")
+        return
+    if user.status != constants.STATUS_APPROVED:
+        await message.answer("Ваша заявка ещё на рассмотрении. Дождитесь ответа руководителя.")
+        return
+    await message.answer(
+        "🤔 Я сейчас не жду от вас ввода — форма могла закрыться, "
+        "например если бот перезапускался.\n\n"
+        "Ничего не сохранено. Откройте нужный раздел заново и повторите.\n"
+        "Если это был ответ клиенту — сначала откройте его чат.",
+        reply_markup=keyboards.main_menu_kb(bool(user.on_shift), user.role),
+    )
