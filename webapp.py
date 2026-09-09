@@ -1503,9 +1503,20 @@ async def api_admin_broadcast(request: web.Request) -> web.Response:
         for user in await database.list_approved_users():
             try:
                 if photo_bytes is not None:
-                    msg = await bot.send_photo(
-                        user.telegram_id, BufferedInputFile(photo_bytes, filename="broadcast.jpg"), caption=full_text
+                    # Upload the bytes once, then hand Telegram back the
+                    # file_id it returned so it resends the photo it already
+                    # holds. Re-uploading the same file for every recipient
+                    # turned one broadcast into N full uploads: with a whole
+                    # staff list and a phone photo that is tens of megabytes
+                    # of pointless traffic, a broadcast that crawls, and a
+                    # much better chance of tripping Telegram's rate limits
+                    # partway through the list.
+                    photo: str | BufferedInputFile = (
+                        photo_file_id
+                        if photo_file_id is not None
+                        else BufferedInputFile(photo_bytes, filename="broadcast.jpg")
                     )
+                    msg = await bot.send_photo(user.telegram_id, photo, caption=full_text)
                     if photo_file_id is None and msg.photo:
                         photo_file_id = msg.photo[-1].file_id
                 else:
