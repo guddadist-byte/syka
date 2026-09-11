@@ -180,6 +180,25 @@ class BackupConfig:
 
 
 @dataclass
+class ScheduledReply:
+    id: int
+    chat_id: str
+    avito_account_id: int
+    author_id: int | None
+    text: str
+    message_uuid: str
+    send_at: str
+    status: str
+    created_at: str
+    sent_at: str | None = None
+    error: str | None = None
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> "ScheduledReply":
+        return _row(cls, row)
+
+
+@dataclass
 class ChatSummary:
     chat_id: str
     avito_account_id: int

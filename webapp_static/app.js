@@ -422,6 +422,42 @@ function renderError(err, retry) {
 
 // --- Chats list --------------------------------------------------------------
 
+// Kept in step with keyboards.LATER_PRESETS on the bot side — both send the
+// same strings to the same parser (utils.parse_send_at).
+const LATER_PRESETS = [
+  ["15 мин", "15"],
+  ["30 мин", "30"],
+  ["1 час", "60"],
+  ["3 часа", "180"],
+  ["Завтра 09:00", "09:00"],
+];
+
+// A queued reply is a message about to reach a customer, so it has to be
+// visible in the chat with a way to call it back.
+function renderScheduled(items) {
+  if (!items || !items.length) return "";
+  return items.map(it => `
+    <div class="sched-row">
+      <span class="sched-when">${it.status === "pending" ? ICONS.clock : "⚠️"} ${esc(it.send_at_label)}</span>
+      <span class="sched-text">${esc(it.text)}</span>
+      <button class="sched-cancel" data-cancel="${it.id}" aria-label="Отменить">${ICONS.x}</button>
+    </div>`).join("");
+}
+
+function wireScheduled(params) {
+  document.querySelectorAll("[data-cancel]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        await apiDelete(`/scheduled/${btn.dataset.cancel}`);
+        toast("Отправка отменена");
+        renderChatDetail(params);
+      } catch (err) {
+        toast(err.data && err.data.error === "too_late" ? "Уже отправлено" : "Ошибка: " + err.message);
+      }
+    });
+  });
+}
+
 SCREENS.chats = renderChats;
 async function renderChats(params) {
   const filter = params.filter || "unread";
@@ -467,6 +503,7 @@ async function renderChatDetail(params) {
             <span>${ICONS.box} ${chat.item_url ? `<a href="${esc(chat.item_url)}" target="_blank" style="color:var(--accent-2)">${esc(chat.item_title)}</a>` : esc(chat.item_title)}</span>
           </div>
         </div>` : ""}
+      <div id="schedBox">${renderScheduled(chat.scheduled)}</div>
       <div class="messages" id="msgList">
         ${(() => {
           // Day is printed once, as a separator, when it changes — a time
@@ -509,6 +546,7 @@ async function renderChatDetail(params) {
         <input type="file" id="photoInput" accept="image/*" multiple hidden>
         <button class="icon-btn" id="photoBtn" style="background:var(--card-bg);border:1px solid var(--card-border);color:var(--text)">${ICONS.camera}</button>
         <textarea id="replyText" rows="1" placeholder="Ответ клиенту…"></textarea>
+        <button class="icon-btn secondary" id="laterBtn" title="Отправить позже">${ICONS.clock}</button>
         <button class="icon-btn" id="sendBtn">${ICONS.send}</button>
       </div>
     `;
@@ -517,6 +555,50 @@ async function renderChatDetail(params) {
     msgList.scrollTop = msgList.scrollHeight;
     const replyText = document.getElementById("replyText");
     const sendBtn = document.getElementById("sendBtn");
+    wireScheduled(params);
+
+    // "Отправить позже": the text is already in the box, so this only asks
+    // when. Presets cover the common answers; the free field takes the same
+    // strings the bot accepts ("45", "18:00") and the server parses both.
+    document.getElementById("laterBtn").addEventListener("click", () => {
+      const text = replyText.value.trim();
+      if (!text) { toast("Сначала напишите текст ответа"); return; }
+      const panel = document.getElementById("assistPanel");
+      panel.innerHTML = `
+        <div class="card">
+          <div class="section-title" style="margin-top:0">Когда отправить</div>
+          <div class="chat-actions">
+            ${LATER_PRESETS.map(([label, value]) =>
+              `<button class="btn secondary small" data-when="${escAttr(value)}">${esc(label)}</button>`).join("")}
+          </div>
+          <div class="field" style="margin-top:8px">
+            <label>Или своё: минуты (45) либо время по МСК (18:00)</label>
+            <input id="laterCustom" inputmode="text" placeholder="45">
+          </div>
+          <button class="btn block small" id="laterOk">Запланировать</button>
+        </div>`;
+      const schedule = async (when) => {
+        try {
+          const res = await apiPost(`/chats/${params.shortId}/schedule`, { text, when });
+          panel.innerHTML = "";
+          replyText.value = "";
+          toast(`Отправится ${res.send_at_label}`);
+          renderChatDetail(params);
+        } catch (err) {
+          toast(err.data && err.data.error === "bad_time"
+            ? "Не понял время. Например: 45 или 18:00"
+            : "Ошибка: " + err.message);
+        }
+      };
+      // The panel renders below a long conversation, so it can open off
+      // screen — bring it into view rather than leaving the tap looking
+      // like nothing happened.
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      panel.querySelectorAll("[data-when]").forEach(b =>
+        b.addEventListener("click", () => schedule(b.dataset.when)));
+      document.getElementById("laterOk").addEventListener("click", () =>
+        schedule(document.getElementById("laterCustom").value.trim()));
+    });
     const warnBanner = document.getElementById("warnBanner");
     let lastDraft = null;
 

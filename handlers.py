@@ -13,6 +13,7 @@ import asyncio
 import html
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta
 
 from aiogram import F, Router
@@ -124,6 +125,16 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
         lines.append(f"{stamp} {speaker}: {text}")
     if not chat.messages:
         lines.append("(сообщений пока нет)")
+
+    # A queued reply has to be visible here, or it is a message about to go
+    # to a customer that nobody can see coming or call back.
+    scheduled = await database.list_scheduled_replies_for_chat(chat.chat_id)
+    if scheduled:
+        lines.append("")
+        for item in scheduled:
+            when = utils.format_msk(item.send_at)
+            mark = "⏰" if item.status == "pending" else "⚠️"
+            lines.append(f"{mark} <i>Запланирован ответ на {when}: {html.escape(item.text[:80])}</i>")
 
     actor = await database.get_user(actor_id)
     can_reassign = bool(actor and constants.ROLE_ORDER.get(actor.role, 0) >= constants.ROLE_ORDER[constants.ADMIN])
@@ -531,6 +542,98 @@ async def open_chat(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await _refresh_chat_from_avito(chat)
     await _render_chat_detail(callback.message, chat, state, callback.from_user.id)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_LATER}_"))
+async def cb_reply_later(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, short_id = callback.data.split("_", 1)
+    chat = await bot_cache.resolve_chat(short_id)
+    if chat is None:
+        await callback.message.answer("Чат больше не доступен.")
+        return
+    await state.set_state(ReplyStates.waiting_for_later_text)
+    await state.update_data(chat_short_id=short_id, opened_at=datetime.utcnow().isoformat())
+    await callback.message.answer(
+        f"⏰ Что отправить клиенту «{html.escape(chat.client_name or 'клиент')}» позже?\n"
+        "Напишите текст ответа — время выберете следующим шагом.",
+        reply_markup=keyboards.cancel_kb(),
+    )
+
+
+@crm_router.message(ReplyStates.waiting_for_later_text, SafeFreeText())
+async def receive_later_text(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    short_id = data.get("chat_short_id")
+    if not short_id or await bot_cache.resolve_chat(short_id) is None:
+        await state.clear()
+        await message.answer("Чат больше не доступен.")
+        return
+    await state.update_data(later_text=message.text)
+    await state.set_state(ReplyStates.waiting_for_later_time)
+    await message.answer(
+        "⏰ Когда отправить?\n\n"
+        "Выберите вариант ниже или пришлите своё: число минут (например <code>45</code>) "
+        "или время по МСК (например <code>18:00</code>).",
+        reply_markup=keyboards.later_time_kb(short_id),
+    )
+
+
+async def _schedule_reply(target: Message, state: FSMContext, raw_when: str, author_id: int) -> None:
+    """Shared by the preset buttons and free-form input — both hand the same
+    kind of string to utils.parse_send_at, so there is one code path."""
+    data = await state.get_data()
+    short_id, text = data.get("chat_short_id"), data.get("later_text")
+    chat = await bot_cache.resolve_chat(short_id) if short_id else None
+    if chat is None or not text:
+        await state.clear()
+        await target.answer("Чат больше не доступен.")
+        return
+
+    send_at = utils.parse_send_at(raw_when)
+    if send_at is None:
+        await target.answer(
+            "Не понял время. Пришлите число минут (например <code>45</code>) "
+            "или время по МСК (например <code>18:00</code>)."
+        )
+        return
+
+    reply_id = await database.create_scheduled_reply(
+        chat.chat_id, chat.avito_account_id, author_id, text, str(uuid.uuid4()), send_at
+    )
+    await state.clear()
+    await target.answer(
+        f"⏰ Ответ уйдёт клиенту {utils.format_msk(send_at.strftime('%Y-%m-%d %H:%M:%S'))} (МСК):\n\n"
+        f"<i>{html.escape(text[:300])}</i>",
+        reply_markup=keyboards.scheduled_reply_kb(reply_id),
+    )
+    await _show_main_menu(target)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_LATERPICK}_"))
+async def cb_reply_later_pick(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    raw_when, _short_id = payload.split(":", 1)
+    await _schedule_reply(callback.message, state, raw_when, callback.from_user.id)
+
+
+@crm_router.message(ReplyStates.waiting_for_later_time, SafeFreeText())
+async def receive_later_time(message: Message, state: FSMContext) -> None:
+    await _schedule_reply(message, state, message.text, message.from_user.id)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_LATERCANCEL}_"))
+async def cb_reply_later_cancel(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, raw_id = callback.data.split("_", 1)
+    # Anyone who can see the chat may cancel, not only the author: shifts
+    # rotate, and the person who scheduled it may be off by the time it
+    # turns out to be wrong.
+    if await database.cancel_scheduled_reply(int(raw_id)):
+        await callback.message.answer("❌ Отложенная отправка отменена.")
+    else:
+        await callback.message.answer("Уже поздно — ответ отправлен или отменён ранее.")
 
 
 @crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_READ}_"))

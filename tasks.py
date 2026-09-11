@@ -451,6 +451,87 @@ async def _orders_poll_loop(bot: Bot) -> None:
         await asyncio.sleep(constants.ORDER_POLL_INTERVAL_SECONDS)
 
 
+async def _send_scheduled_reply(bot: Bot, item: models.ScheduledReply) -> None:
+    """Deliver one claimed reply and run the same post-send steps as a live one.
+
+    Everything after the send mirrors handlers.receive_reply_text /
+    webapp.api_chat_reply exactly — a scheduled reply is a real reply, so it
+    has to land in the cache, in the message history, clear the chat's unread
+    state and earn its author the same rating point. Skipping any of those
+    would leave the chat looking unanswered right after answering it.
+    """
+    client = avito_client.get_pool().get(item.avito_account_id)
+    if client is None:
+        await database.mark_scheduled_reply_failed(item.id, "Avito-аккаунт недоступен")
+        await _tell_author(bot, item, "⚠️ Отложенный ответ не отправлен: аккаунт Avito недоступен.")
+        return
+
+    try:
+        sent = await client.send_text_message(item.chat_id, item.text, item.message_uuid)
+    except avito_client.AvitoAPIError as exc:
+        await database.mark_scheduled_reply_failed(item.id, str(exc))
+        await _tell_author(bot, item, f"⚠️ Отложенный ответ не отправлен: {exc}\n\nОтветьте клиенту вручную.")
+        return
+
+    now = datetime.utcnow()
+    await bot_cache.add_message(
+        item.chat_id,
+        bot_cache.CachedMessage(
+            avito_message_id=sent.message_id, direction="out", text=item.text,
+            has_image=False, created_at=now,
+        ),
+    )
+    if item.author_id is not None:
+        await bot_cache.mark_replied(item.chat_id, item.author_id)
+        await database.mark_chat_replied(item.chat_id, item.author_id)
+        await database.increment_rating(item.author_id)
+    await database.append_message(
+        item.chat_id, "out", item.text, False,
+        sent_at=now.strftime("%Y-%m-%d %H:%M:%S"), avito_message_id=sent.message_id,
+    )
+    try:
+        await client.mark_chat_read(item.chat_id)
+    except avito_client.AvitoAPIError:
+        pass
+    await database.mark_scheduled_reply_sent(item.id)
+
+    short_id = await bot_cache.get_short_id(item.chat_id)
+    await _tell_author(
+        bot, item,
+        f"✅ Отложенный ответ отправлен:\n\n<i>{html.escape(item.text[:200])}</i>",
+        reply_markup=keyboards.chat_notification_kb(short_id) if short_id else None,
+    )
+
+
+async def _tell_author(bot: Bot, item: models.ScheduledReply, text: str, reply_markup=None) -> None:
+    if item.author_id is None:
+        return
+    try:
+        await bot.send_message(item.author_id, text, reply_markup=reply_markup)
+    except TelegramForbiddenError:
+        await database.mark_user_unreachable(item.author_id)
+    except Exception:
+        logger.exception("_tell_author: failed to notify %s", item.author_id)
+
+
+async def _scheduled_replies_loop(bot: Bot) -> None:
+    while True:
+        await asyncio.sleep(constants.SCHEDULED_REPLY_CHECK_INTERVAL_SECONDS)
+        try:
+            for item in await database.list_due_scheduled_replies(datetime.utcnow()):
+                # Claim before sending: the claim is what makes "at most one
+                # send" true, so nothing may happen before it succeeds.
+                if not await database.claim_scheduled_reply(item.id):
+                    continue
+                try:
+                    await _send_scheduled_reply(bot, item)
+                except Exception:
+                    logger.exception("_scheduled_replies_loop: failed to send %s", item.id)
+                    await database.mark_scheduled_reply_failed(item.id, "внутренняя ошибка")
+        except Exception:
+            logger.exception("_scheduled_replies_loop: failed")
+
+
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     accounts = await database.list_avito_accounts(active_only=True)
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
@@ -458,6 +539,7 @@ async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     tasks.append(asyncio.create_task(_prune_messages_loop()))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
     tasks.append(asyncio.create_task(_orders_poll_loop(bot)))
+    tasks.append(asyncio.create_task(_scheduled_replies_loop(bot)))
     return tasks
 
 

@@ -8,6 +8,10 @@ from aiogram.fsm.state import State, StatesGroup
 class ReplyStates(StatesGroup):
     waiting_for_text = State()
     waiting_for_photo = State()
+    # "Отправить позже": the text first, then when it should go out — asking
+    # for a moment before there is anything to send would be backwards.
+    waiting_for_later_text = State()
+    waiting_for_later_time = State()
 
 
 class AIStates(StatesGroup):

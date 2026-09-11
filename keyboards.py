@@ -104,6 +104,9 @@ def chat_detail_kb(short_id: str, can_reassign: bool = False) -> InlineKeyboardM
         InlineKeyboardButton(text="🧠 ИИ-ответ", callback_data=f"{constants.PREFIX_AIDRAFT}_{short_id}"),
         InlineKeyboardButton(text="📋 Шаблоны", callback_data=f"{constants.PREFIX_TPL}_{short_id}"),
     )
+    builder.row(
+        InlineKeyboardButton(text="⏰ Отправить позже", callback_data=f"{constants.PREFIX_LATER}_{short_id}")
+    )
     if can_reassign:
         builder.row(
             InlineKeyboardButton(
@@ -112,6 +115,47 @@ def chat_detail_kb(short_id: str, can_reassign: bool = False) -> InlineKeyboardM
         )
     builder.row(
         InlineKeyboardButton(text=constants.BTN_BACK, callback_data=f"{constants.PREFIX_BACKMENU}_{short_id}")
+    )
+    return builder.as_markup()
+
+
+# Quick picks cover what people actually ask for; anything else is typed in
+# free-form ("45" or "18:00"), so the buttons never have to enumerate
+# everything. The payload is what utils.parse_send_at already understands, so
+# a tap and a typed answer take exactly the same path.
+LATER_PRESETS: list[tuple[str, str]] = [
+    ("15 мин", "15"),
+    ("30 мин", "30"),
+    ("1 час", "60"),
+    ("3 часа", "180"),
+    ("Завтра 09:00", "09:00"),
+]
+
+
+def later_time_kb(short_id: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    row: list[InlineKeyboardButton] = []
+    for label, payload in LATER_PRESETS:
+        row.append(
+            InlineKeyboardButton(
+                text=label, callback_data=f"{constants.PREFIX_LATERPICK}_{payload}:{short_id}"
+            )
+        )
+        if len(row) == 2:
+            builder.row(*row)
+            row = []
+    if row:
+        builder.row(*row)
+    builder.row(InlineKeyboardButton(text=constants.BTN_CANCEL, callback_data=f"{constants.PREFIX_CHAT}_{short_id}"))
+    return builder.as_markup()
+
+
+def scheduled_reply_kb(reply_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="❌ Отменить отправку", callback_data=f"{constants.PREFIX_LATERCANCEL}_{reply_id}"
+        )
     )
     return builder.as_markup()
 

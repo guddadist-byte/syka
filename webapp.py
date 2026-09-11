@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -234,6 +235,18 @@ def _serialize_chat(chat: bot_cache.CachedChat, *, with_messages: bool = False) 
     return data
 
 
+async def _serialize_scheduled(chat_id: str) -> list[dict]:
+    return [
+        {
+            "id": item.id,
+            "text": item.text,
+            "status": item.status,
+            "send_at_label": utils.format_msk(item.send_at),
+        }
+        for item in await database.list_scheduled_replies_for_chat(chat_id)
+    ]
+
+
 # --- routes: profile / shift -------------------------------------------------
 
 
@@ -358,7 +371,9 @@ async def api_chat_detail(request: web.Request) -> web.Response:
     if chat is None:
         return web.json_response({"error": "not_found"}, status=404)
     await _refresh_chat_from_avito(chat)
-    return web.json_response(_serialize_chat(chat, with_messages=True))
+    data = _serialize_chat(chat, with_messages=True)
+    data["scheduled"] = await _serialize_scheduled(chat.chat_id)
+    return web.json_response(data)
 
 
 async def api_chat_read(request: web.Request) -> web.Response:
@@ -426,6 +441,41 @@ async def api_chat_reply(request: web.Request) -> web.Response:
         "time_label": utils.to_msk(now).strftime("%H:%M"),
         "day_label": utils.msk_day_label(now),
     })
+
+
+async def api_chat_schedule(request: web.Request) -> web.Response:
+    """Queue a reply for later. Mirrors handlers._schedule_reply."""
+    user: models.User = request["user"]
+    chat = await bot_cache.resolve_chat(request.match_info["short_id"])
+    if chat is None:
+        return web.json_response({"error": "not_found"}, status=404)
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    if not text:
+        return web.json_response({"error": "empty_text"}, status=400)
+
+    send_at = utils.parse_send_at(str(body.get("when") or ""))
+    if send_at is None:
+        return web.json_response({"error": "bad_time"}, status=400)
+
+    reply_id = await database.create_scheduled_reply(
+        chat.chat_id, chat.avito_account_id, user.telegram_id, text, str(uuid.uuid4()), send_at
+    )
+    return web.json_response({
+        "ok": True,
+        "id": reply_id,
+        "send_at_label": utils.format_msk(send_at.strftime("%Y-%m-%d %H:%M:%S")),
+    })
+
+
+async def api_scheduled_cancel(request: web.Request) -> web.Response:
+    # Deliberately not restricted to the author — see the same note in
+    # handlers.cb_reply_later_cancel.
+    ok = await database.cancel_scheduled_reply(int(request.match_info["reply_id"]))
+    if not ok:
+        return web.json_response({"error": "too_late"}, status=409)
+    return web.json_response({"ok": True})
 
 
 async def api_chat_reply_photo(request: web.Request) -> web.Response:
@@ -1615,6 +1665,8 @@ def create_app(bot_token: str, bot=None, db_path: str | None = None) -> web.Appl
     app.router.add_get("/api/chats/{short_id}/templates", api_chat_templates)
     app.router.add_post("/api/chats/{short_id}/templates/{template_id}/apply", api_chat_template_apply)
     app.router.add_delete("/api/messages/{msg_ref}", api_message_delete)
+    app.router.add_post("/api/chats/{short_id}/schedule", api_chat_schedule)
+    app.router.add_delete("/api/scheduled/{reply_id}", api_scheduled_cancel)
 
     app.router.add_get("/api/templates/mine", api_templates_mine)
     app.router.add_post("/api/templates/mine", api_templates_mine_create)

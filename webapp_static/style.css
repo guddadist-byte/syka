@@ -543,6 +543,62 @@ html, body {
   backdrop-filter: var(--blur);
 }
 
+/* Queued ("отправить позже") replies, shown above the conversation */
+.sched-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  border-radius: 16px;
+  background: var(--panel-strong);
+  border: 1px dashed var(--card-edge);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  font-size: 12.5px;
+}
+
+.sched-when {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sched-when svg { width: 14px; height: 14px; }
+
+.sched-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sched-cancel {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sched-cancel svg { width: 14px; height: 14px; }
+
+.icon-btn.secondary {
+  background: var(--panel-strong);
+  border: 1px solid var(--card-border);
+  color: var(--text);
+  box-shadow: none;
+}
+
 .reply-bar {
   display: flex;
   gap: 8px;

@@ -13,13 +13,14 @@ import fcntl
 import io
 import math
 import os
+import re
 from datetime import datetime, timedelta
 from typing import IO
 
 import barcode
 from barcode.writer import ImageWriter
 
-from constants import MSK_OFFSET_HOURS
+from constants import MSK_OFFSET_HOURS, SCHEDULED_REPLY_MAX_MINUTES
 
 _ISO_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f")
 
@@ -49,6 +50,42 @@ def msk_day_label(dt_utc: datetime) -> str:
     if days == 1:
         return "Вчера"
     return msk.strftime("%d.%m.%Y")
+
+
+_CLOCK_RE = re.compile(r"^([01]?\d|2[0-3])[:.\s]([0-5]\d)$")
+
+
+def parse_send_at(raw: str, *, now_utc: datetime | None = None) -> datetime | None:
+    """Parse "через сколько" or "во сколько" into a UTC send time.
+
+    Accepts either a plain number of minutes ("30", "90") or a clock time in
+    Moscow time ("18:00", "18.00", "9:30"). A clock time that has already
+    passed today means tomorrow — asking for 09:00 at 10am plainly means the
+    next morning, not a moment in the past.
+
+    Returns None for anything it cannot read, so the caller can show the
+    examples rather than guess at an intent.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    now = now_utc or datetime.utcnow()
+
+    if text.isdigit():
+        minutes = int(text)
+        if not 1 <= minutes <= SCHEDULED_REPLY_MAX_MINUTES:
+            return None
+        return now + timedelta(minutes=minutes)
+
+    match = _CLOCK_RE.match(text)
+    if not match:
+        return None
+    hour, minute = int(match.group(1)), int(match.group(2))
+    msk_now = to_msk(now)
+    target_msk = msk_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target_msk <= msk_now:
+        target_msk += timedelta(days=1)
+    return target_msk - timedelta(hours=MSK_OFFSET_HOURS)
 
 
 def format_msk(iso_utc: str, fmt: str = "%d.%m %H:%M") -> str:

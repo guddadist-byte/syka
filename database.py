@@ -758,6 +758,84 @@ async def update_welcome_message(text: str, actor_id: int) -> None:
     )
 
 
+# --- scheduled replies ----------------------------------------------------
+
+
+async def create_scheduled_reply(
+    chat_id: str, avito_account_id: int, author_id: int, text: str, message_uuid: str, send_at: datetime
+) -> int:
+    cur = await _execute(
+        """
+        INSERT INTO scheduled_replies (chat_id, avito_account_id, author_id, text, message_uuid, send_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (chat_id, avito_account_id, author_id, text, message_uuid, send_at.strftime("%Y-%m-%d %H:%M:%S")),
+    )
+    return int(cur.lastrowid)
+
+
+async def list_due_scheduled_replies(now_utc: datetime) -> list[models.ScheduledReply]:
+    rows = await _fetchall(
+        "SELECT * FROM scheduled_replies WHERE status = 'pending' AND send_at <= ? ORDER BY send_at",
+        (now_utc.strftime("%Y-%m-%d %H:%M:%S"),),
+    )
+    return [models.ScheduledReply.from_row(r) for r in rows]
+
+
+async def claim_scheduled_reply(reply_id: int) -> bool:
+    """Take ownership of a due reply. True only for the caller that won it.
+
+    This, not Avito's idempotency header, is what stops a reply going out
+    twice: the header's behaviour on Avito's side was never confirmed, and a
+    customer receiving the same message twice is worse than a late one. The
+    UPDATE is conditional on the row still being 'pending', so two passes
+    racing on the same row leave exactly one winner.
+    """
+    cur = await _execute(
+        "UPDATE scheduled_replies SET status = 'sending' WHERE id = ? AND status = 'pending'",
+        (reply_id,),
+    )
+    return cur.rowcount == 1
+
+
+async def mark_scheduled_reply_sent(reply_id: int) -> None:
+    await _execute(
+        "UPDATE scheduled_replies SET status = 'sent', sent_at = datetime('now') WHERE id = ?",
+        (reply_id,),
+    )
+
+
+async def mark_scheduled_reply_failed(reply_id: int, error: str) -> None:
+    await _execute(
+        "UPDATE scheduled_replies SET status = 'failed', error = ? WHERE id = ?",
+        (error[:500], reply_id),
+    )
+
+
+async def cancel_scheduled_reply(reply_id: int) -> bool:
+    """Cancel a reply that has not gone out yet. False if it is too late."""
+    cur = await _execute(
+        "UPDATE scheduled_replies SET status = 'canceled' WHERE id = ? AND status = 'pending'",
+        (reply_id,),
+    )
+    return cur.rowcount == 1
+
+
+async def get_scheduled_reply(reply_id: int) -> models.ScheduledReply | None:
+    row = await _fetchone("SELECT * FROM scheduled_replies WHERE id = ?", (reply_id,))
+    return models.ScheduledReply.from_row(row) if row else None
+
+
+async def list_scheduled_replies_for_chat(chat_id: str) -> list[models.ScheduledReply]:
+    """Still-open replies for a chat: queued ones, plus any left stuck mid-send
+    by a crash — those are shown too so nothing disappears without a trace."""
+    rows = await _fetchall(
+        "SELECT * FROM scheduled_replies WHERE chat_id = ? AND status IN ('pending', 'sending') ORDER BY send_at",
+        (chat_id,),
+    )
+    return [models.ScheduledReply.from_row(r) for r in rows]
+
+
 # --- backup config -------------------------------------------------------
 
 

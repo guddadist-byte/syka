@@ -123,6 +123,9 @@ PREFIX_TPL = "tpl"
 PREFIX_ADM = "adm"
 PREFIX_DELMSG = "delmsg"
 PREFIX_REASSIGN = "reassign"
+PREFIX_LATER = "later"
+PREFIX_LATERPICK = "latpick"
+PREFIX_LATERCANCEL = "latcancel"
 PREFIX_READ = "read"
 PREFIX_REFRESH = "refresh"
 PREFIX_RATING = "rating"
@@ -145,6 +148,13 @@ MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
 MESSAGE_RETENTION_DAYS = 30
 BACKUP_LOOP_INTERVAL_SECONDS = 3600
 ORDER_POLL_INTERVAL_SECONDS = 120
+# How often to look for scheduled replies that have come due. 30s keeps the
+# worst-case lateness under half a minute, which is well inside what anyone
+# means by "send this at 18:00".
+SCHEDULED_REPLY_CHECK_INTERVAL_SECONDS = 30
+# Furthest ahead a reply may be scheduled (a week). Past that it is far more
+# likely a typo in the minutes field than a real intention.
+SCHEDULED_REPLY_MAX_MINUTES = 7 * 24 * 60
 
 # Telegram caps a photo caption at 1024 characters (a plain message allows
 # 4096). A broadcast whose text is longer therefore cannot ride along as a
