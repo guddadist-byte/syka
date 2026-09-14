@@ -1422,6 +1422,14 @@ async def cb_point_action(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_reply_markup(
             reply_markup=keyboards.point_multiselect_kb(all_points, current, "sub", key)
         )
+    elif mode == "acpoint":
+        account_id = int(key)
+        await database.set_avito_account_point(account_id, point_id)
+        point = await database.get_point(point_id)
+        await callback.message.answer(
+            f"✅ Точка по умолчанию для кабинета: {html.escape(point.name) if point else point_id}.\n"
+            "Новые заказы этого кабинета будут привязываться к ней автоматически."
+        )
     elif mode == "resp":
         user_id = int(key)
         await database.set_user_role(user_id, constants.MANAGER, callback.from_user.id)
@@ -1900,10 +1908,30 @@ async def cb_admin_avito_edit(callback: CallbackQuery) -> None:
     builder.row(InlineKeyboardButton(
         text="🔴 Выключить" if account.is_active else "🟢 Включить", callback_data=f"adm_avitotoggle_{account_id}"
     ))
+    builder.row(InlineKeyboardButton(text="📍 Точка по умолчанию", callback_data=f"adm_avitopoint_{account_id}"))
+    point = await database.get_point(account.point_id) if account.point_id else None
     text = f"🔑 {account.name}\nclient_id: {account.client_id}\nтокен: {'есть' if account.access_token else 'нет'}"
+    text += f"\n📍 Точка по умолчанию: {html.escape(point.name) if point else 'не задана'}"
+    if not point:
+        text += (
+            "\n\nПока она не задана, заказы Авито Доставки без переписки с покупателем "
+            "не привязываются ни к какой точке — они видны в «📦 Заказы Avito» "
+            "отдельным блоком, но уведомления по ним не приходят."
+        )
     if account.last_poll_error:
         text += f"\n⚠️ {account.last_poll_error}"
     await callback.message.answer(text, reply_markup=builder.as_markup())
+
+
+@settings_router.callback_query(F.data.startswith("adm_avitopoint_"))
+async def cb_admin_avito_point(callback: CallbackQuery) -> None:
+    await callback.answer()
+    account_id = int(callback.data.rsplit("_", 1)[1])
+    points = await database.list_points()
+    await callback.message.answer(
+        "Выберите точку по умолчанию для этого кабинета:",
+        reply_markup=keyboards.point_multiselect_kb(points, selected=set(), mode="acpoint", key=str(account_id)),
+    )
 
 
 @settings_router.callback_query(F.data.startswith("adm_avitotoggle_"))
@@ -2379,7 +2407,7 @@ async def show_orders_menu(message: Message) -> None:
     await _show_all_orders(message, message.from_user.id)
 
 
-async def _show_all_orders(message: Message, actor_id: int) -> None:
+async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = False) -> None:
     accounts = await database.list_avito_accounts(active_only=True)
     if not accounts:
         await message.answer("Нет подключённых Avito-аккаунтов.")
@@ -2388,14 +2416,16 @@ async def _show_all_orders(message: Message, actor_id: int) -> None:
     actor = await database.get_user(actor_id)
     point_ids = await _point_ids_for_user(actor) if actor else set()
 
-    shown: list[tuple[dict, int, str]] = []
+    mine: list[tuple[dict, int]] = []
+    unassigned: list[tuple[dict, int]] = []
+    other_points = 0
     errors: list[str] = []
     for account in accounts:
         client = avito_client.get_pool().get(account.id)
         if client is None:
             continue
         try:
-            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=True)
+            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=not fresh)
         except avito_client.AvitoAPIError as exc:
             logger.exception("_show_all_orders: failed for account %s", account.id)
             errors.append(f"{account.name}: {exc}")
@@ -2403,27 +2433,56 @@ async def _show_all_orders(message: Message, actor_id: int) -> None:
         for order in orders:
             point_id = await database.resolve_order_point_id(order, avito_account_id=account.id)
             if point_id in point_ids:
-                shown.append((order, account.id, account.name))
+                mine.append((order, account.id))
+            elif point_id is None:
+                # An Avito Delivery order placed without a single message
+                # from the buyer has nothing to attribute it to. It used to
+                # be dropped here without a trace — which is a missed
+                # shipment, not a tidy list.
+                unassigned.append((order, account.id))
+            else:
+                other_points += 1
 
-    if not shown:
-        text = "📦 Активных заказов нет."
+    if not mine and not unassigned:
+        # Never just "нет заказов": that read the same whether the account
+        # really had none or the filter had swallowed every one of them.
+        lines = ["📦 Активных заказов нет."]
+        if other_points:
+            lines.append(f"Скрыто заказов других точек: {other_points}.")
+        if not point_ids:
+            lines.append("Вы не подписаны ни на одну точку — откройте «📍 Мои точки».")
         if errors:
-            text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
-        await message.answer(text)
+            lines.append("\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors))
+        await message.answer("\n".join(lines), reply_markup=keyboards.orders_refresh_kb())
         return
 
-    text = "📦 Ваши заказы:"
-    if errors:
-        text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
-    kb = keyboards.orders_menu_kb([(order, account_id) for order, account_id, _name in shown])
-    await message.answer(text, reply_markup=kb)
+    if mine:
+        text = f"📦 Ваши заказы: {len(mine)}"
+        if other_points:
+            text += f"\nСкрыто заказов других точек: {other_points}"
+        if errors:
+            text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
+        await message.answer(text, reply_markup=keyboards.orders_menu_kb(mine, with_refresh=True))
+
+    if unassigned:
+        await message.answer(
+            f"📍 Точка не определена: {len(unassigned)}\n"
+            "Эти заказы пришли без переписки с покупателем, привязать их не к чему. "
+            "Задайте точку по умолчанию для кабинета в «⚙️ Настройки → 🔑 Avito API», "
+            "и следующие такие заказы встанут на место сами.",
+            reply_markup=keyboards.orders_menu_kb(unassigned, with_refresh=not mine),
+        )
 
 
-async def _show_order_detail(message: Message, order_id: str, account_id: int) -> None:
+async def _show_order_detail(message: Message, order_id: str, account_id: int, *, fresh: bool = False) -> None:
     client = avito_client.get_pool().get(account_id)
     if client is None:
         await message.answer("⚠️ Аккаунт Avito недоступен.")
         return
+    if fresh:
+        # find_order reads the cache first, so dropping it is the only way
+        # to make "Обновить" actually reach Avito.
+        client.invalidate_orders_cache()
     try:
         order = await client.find_order(order_id)
     except avito_client.AvitoAPIError as exc:
@@ -2514,6 +2573,25 @@ async def cb_order_view(callback: CallbackQuery) -> None:
 async def cb_order_back(callback: CallbackQuery) -> None:
     await callback.answer()
     await _show_all_orders(callback.message, callback.from_user.id)
+
+
+@crm_router.callback_query(F.data == constants.PREFIX_ORDREFRESH)
+async def cb_orders_refresh(callback: CallbackQuery) -> None:
+    await callback.answer("Обновляю…")
+    # Every account, since the list spans all of them.
+    for account in await database.list_avito_accounts(active_only=True):
+        client = avito_client.get_pool().get(account.id)
+        if client is not None:
+            client.invalidate_orders_cache()
+    await _show_all_orders(callback.message, callback.from_user.id, fresh=True)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_ORDREFRESHONE}_"))
+async def cb_order_refresh_one(callback: CallbackQuery) -> None:
+    await callback.answer("Обновляю…")
+    _, payload = callback.data.split("_", 1)
+    order_id, account_id_str = payload.split(":")
+    await _show_order_detail(callback.message, order_id, int(account_id_str), fresh=True)
 
 
 @crm_router.callback_query(F.data.startswith("ordact_"))

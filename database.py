@@ -641,6 +641,16 @@ async def update_avito_account_credentials(account_id: int, client_id: str, clie
     )
 
 
+async def set_avito_account_point(account_id: int, point_id: int | None) -> None:
+    """Default point for a cabinet — the last tier of resolve_order_point_id.
+
+    Nothing ever wrote this column before, so that tier could never fire:
+    every Avito Delivery order placed without a message from the buyer
+    resolved to None and vanished from the order screens.
+    """
+    await _execute("UPDATE avito_accounts SET point_id = ? WHERE id = ?", (point_id, account_id))
+
+
 async def set_avito_account_active(account_id: int, is_active: bool) -> None:
     await _execute("UPDATE avito_accounts SET is_active = ? WHERE id = ?", (1 if is_active else 0, account_id))
 

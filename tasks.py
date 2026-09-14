@@ -371,8 +371,10 @@ async def _notify_new_order(bot: Bot, order: dict, account_id: int) -> None:
     point_id = await database.resolve_order_point_id(order, avito_account_id=account_id)
     if point_id is None:
         # Same policy as chat notifications: no resolvable point -> stay
-        # silent rather than guess-broadcast. Still visible on demand via
-        # "📦 Заказы Avito".
+        # silent rather than guess-broadcast. The order is not lost: the
+        # "📦 Заказы Avito" screens list it under "точка не определена".
+        # Give the cabinet a default point (Настройки → Avito API) and
+        # orders like this route — and notify — on their own.
         return
 
     # Unlike chat notifications, deliberately NOT limited to on-shift

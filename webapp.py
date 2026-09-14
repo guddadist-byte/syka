@@ -194,6 +194,7 @@ def _serialize_avito_account(acc: models.AvitoAccount) -> dict:
         "is_active": bool(acc.is_active),
         "has_token": bool(acc.access_token),
         "last_poll_error": acc.last_poll_error,
+        "point_id": acc.point_id,
     }
 
 
@@ -767,21 +768,33 @@ async def api_orders(request: web.Request) -> web.Response:
     point_ids = await _point_ids_for_user(user)
     accounts = await database.list_avito_accounts(active_only=True)
 
+    # ?fresh=1 is what the Обновить button sends. Without dropping the
+    # cache the button would re-render the same snapshot for up to
+    # ORDERS_CACHE_TTL_SECONDS and look broken.
+    fresh = request.query.get("fresh") == "1"
+
     result = []
     errors = []
+    other_points = 0
     for account in accounts:
         client = avito_client.get_pool().get(account.id)
         if client is None:
             continue
+        if fresh:
+            client.invalidate_orders_cache()
         try:
-            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=True)
+            orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=not fresh)
         except avito_client.AvitoAPIError as exc:
             logger.exception("api_orders: failed for account %s", account.id)
             errors.append(f"{account.name}: {exc}")
             continue
         for order in orders:
             point_id = await database.resolve_order_point_id(order, avito_account_id=account.id)
-            if point_id not in point_ids:
+            # An order nobody can attribute to a point used to be dropped
+            # here in silence — a missed shipment, not a tidy list. It now
+            # travels with an "unassigned" flag and the frontend groups it.
+            if point_id not in point_ids and point_id is not None:
+                other_points += 1
                 continue
             items = order.get("items") or []
             status = order.get("status", "")
@@ -792,9 +805,15 @@ async def api_orders(request: web.Request) -> web.Response:
                 "status": status,
                 "status_label": constants.ORDER_STATUS_LABELS.get(status, status),
                 "title": (items[0].get("title") if items else None) or "(без названия)",
+                "unassigned": point_id is None,
             })
 
-    return web.json_response({"orders": result, "errors": errors})
+    return web.json_response({
+        "orders": result,
+        "errors": errors,
+        "hidden_other_points": other_points,
+        "has_subscriptions": bool(point_ids),
+    })
 
 
 async def api_order_detail(request: web.Request) -> web.Response:
@@ -803,6 +822,8 @@ async def api_order_detail(request: web.Request) -> web.Response:
     client = avito_client.get_pool().get(account_id)
     if client is None:
         return web.json_response({"error": "avito_unavailable"}, status=503)
+    if request.query.get("fresh") == "1":
+        client.invalidate_orders_cache()
     try:
         order = await client.find_order(order_id)
     except avito_client.AvitoAPIError as exc:

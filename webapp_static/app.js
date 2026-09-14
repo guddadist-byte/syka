@@ -858,26 +858,43 @@ async function renderPoints() {
 // --- Orders list ---------------------------------------------------------------
 
 SCREENS.orders = renderOrders;
-async function renderOrders() {
+async function renderOrders(params) {
   setHeader("Заказы Avito", "", true);
   loading();
   try {
-    const data = await apiGet("/orders");
+    const data = await apiGet(`/orders${params && params.fresh ? "?fresh=1" : ""}`);
     if (data.errors && data.errors.length) {
       toast("⚠️ " + data.errors[0]);
     }
-    if (!data.orders.length) {
-      screenRoot.innerHTML = '<div class="empty-state">Активных заказов нет</div>';
-      return;
-    }
-    screenRoot.innerHTML = data.orders.map(o => `
-      <button class="list-btn" data-order="${esc(o.id)}" data-account="${esc(o.account_id)}">
+    const mine = data.orders.filter(o => !o.unassigned);
+    const unassigned = data.orders.filter(o => o.unassigned);
+
+    const card = o => `
+      <button class="list-btn" data-order="${escAttr(o.id)}" data-account="${escAttr(o.account_id)}">
         <div class="row-top">
           <span class="name">${esc(o.status_label)}</span>
         </div>
         <div class="preview">${esc(o.title)} · ${esc(o.account_name || "")}</div>
-      </button>
-    `).join("");
+      </button>`;
+
+    // Never a bare "нет заказов": that read identically whether the account
+    // had none or the point filter had swallowed every one of them.
+    const notes = [];
+    if (data.hidden_other_points) notes.push(`Скрыто заказов других точек: ${data.hidden_other_points}`);
+    if (!data.has_subscriptions) notes.push("Вы не подписаны ни на одну точку — откройте «Мои точки»");
+
+    screenRoot.innerHTML = `
+      <button class="btn secondary small" id="ordRefresh">${ICONS.refresh} Обновить</button>
+      ${notes.length ? `<div class="preview" style="padding:0 4px">${notes.map(esc).join("<br>")}</div>` : ""}
+      ${mine.length ? mine.map(card).join("") : ""}
+      ${unassigned.length ? `
+        <div class="section-title">Точка не определена: ${unassigned.length}</div>
+        <div class="preview" style="padding:0 4px">Заказы пришли без переписки с покупателем.
+        Задайте точку по умолчанию для кабинета в «Настройки → Avito API».</div>
+        ${unassigned.map(card).join("")}` : ""}
+      ${!data.orders.length ? '<div class="empty-state">Активных заказов нет</div>' : ""}
+    `;
+    document.getElementById("ordRefresh").addEventListener("click", () => renderOrders({ fresh: true }));
     screenRoot.querySelectorAll("[data-order]").forEach(btn => {
       btn.addEventListener("click", () => go("orderDetail", { orderId: btn.dataset.order, accountId: btn.dataset.account }));
     });
@@ -893,7 +910,8 @@ async function renderOrderDetail(params) {
   setHeader("Заказ", "", true);
   loading();
   try {
-    const order = await apiGet(`/orders/${params.accountId}/${params.orderId}`);
+    const order = await apiGet(
+      `/orders/${params.accountId}/${params.orderId}${params.fresh ? "?fresh=1" : ""}`);
     setHeader(order.status_label, order.account_name || "", true);
 
     const actions = order.available_actions || [];
@@ -901,6 +919,7 @@ async function renderOrderDetail(params) {
       actions.includes(name) ? `<button class="btn ${cls || ""} small" data-action="${name}">${label}</button>` : "";
 
     screenRoot.innerHTML = `
+      <button class="btn secondary small" id="ordOneRefresh">${ICONS.refresh} Обновить</button>
       ${order.has_barcode ? `<img class="barcode-img" id="barcodeImg" alt="barcode">` : ""}
       <div class="card">
         ${order.point_name ? `<div class="card-row"><span>Точка</span><span>${esc(order.point_name)}</span></div>` : ""}
@@ -953,6 +972,8 @@ async function renderOrderDetail(params) {
         .catch(() => { const img = document.getElementById("barcodeImg"); if (img) img.remove(); });
     }
 
+    document.getElementById("ordOneRefresh").addEventListener(
+      "click", () => renderOrderDetail(Object.assign({}, params, { fresh: true })));
     screenRoot.querySelectorAll("[data-action]").forEach(btn => {
       btn.addEventListener("click", () => handleOrderAction(btn.dataset.action, params, order));
     });

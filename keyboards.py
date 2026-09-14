@@ -445,10 +445,22 @@ def order_notification_kb(order_id, account_id: int) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]]) -> InlineKeyboardMarkup:
-    """One button per order — status + item name, like chat_list_kb.
-    Tapping one opens its detail card (see order_detail_kb)."""
+def orders_refresh_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data=constants.PREFIX_ORDREFRESH))
+    return builder.as_markup()
+
+
+def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]], with_refresh: bool = False) -> InlineKeyboardMarkup:
+    """One button per order — status + item name, like chat_list_kb.
+    Tapping one opens its detail card (see order_detail_kb).
+
+    with_refresh puts the refresh row on exactly one of the two lists the
+    orders screen can print, so the button appears once rather than twice.
+    """
+    builder = InlineKeyboardBuilder()
+    if with_refresh:
+        builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data=constants.PREFIX_ORDREFRESH))
     for order, account_id in orders_with_accounts:
         order_id = order.get("id")
         status_label = constants.ORDER_STATUS_LABELS.get(order.get("status", ""), "📦")
@@ -498,7 +510,12 @@ def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = No
         builder.row(
             InlineKeyboardButton(text="💬 Чат с покупателем", callback_data=f"{constants.PREFIX_CHAT}_{chat_short_id}")
         )
-    builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ordback"))
+    builder.row(
+        InlineKeyboardButton(
+            text="🔄 Обновить", callback_data=f"{constants.PREFIX_ORDREFRESHONE}_{order_id}:{account_id}"
+        ),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="ordback"),
+    )
     return builder.as_markup()
 
 
