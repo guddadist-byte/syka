@@ -62,6 +62,7 @@ class AdminStates(StatesGroup):
 
     # Backup settings
     waiting_for_backup_interval = State()
+    waiting_for_startup_recipient = State()
     waiting_for_backup_recipient = State()
 
     # Broadcast composer

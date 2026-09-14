@@ -287,6 +287,13 @@ async def mark_replied(chat_id: str, by_user_id: int) -> None:
             chat.last_replied_by = by_user_id
 
 
+async def count_chats() -> tuple[int, int]:
+    """(всего чатов в памяти, из них непрочитанных) — для отчёта о запуске."""
+    async with _lock:
+        chats = list(_chats.values())
+    return len(chats), sum(1 for c in chats if c.unread_count > 0)
+
+
 async def get_unread_for_points(point_ids: set[int] | None) -> list[CachedChat]:
     async with _lock:
         chats = list(_chats.values())

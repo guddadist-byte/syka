@@ -532,6 +532,88 @@ async def _scheduled_replies_loop(bot: Bot) -> None:
             logger.exception("_scheduled_replies_loop: failed")
 
 
+async def _heartbeat_loop() -> None:
+    while True:
+        try:
+            await database.touch_heartbeat()
+        except Exception:
+            logger.exception("_heartbeat_loop: failed")
+        await asyncio.sleep(constants.HEARTBEAT_INTERVAL_SECONDS)
+
+
+def _downtime_line(cfg: models.StartupNotifyConfig, now: datetime) -> str:
+    """How long the bot was actually away, and whether it left on its own.
+
+    "last_stopped_at newer than the last heartbeat" means shutdown ran — a
+    deploy. Otherwise the process died between heartbeats without getting to
+    its shutdown path, which is the case worth waking up for.
+    """
+    if not cfg.last_heartbeat_at:
+        return "🔹 Первый запуск — простой посчитать не с чем"
+    last_seen = utils.parse_utc(cfg.last_heartbeat_at)
+    minutes = max(0, int((now - last_seen).total_seconds() // 60))
+    graceful = bool(cfg.last_stopped_at) and utils.parse_utc(cfg.last_stopped_at) >= last_seen
+    how = "штатная остановка" if graceful else "⚠️ аварийная остановка"
+    return f"🔹 Простой: {minutes} мин ({how})"
+
+
+async def build_startup_report(*, webapp_enabled: bool, now: datetime | None = None) -> str:
+    now = now or datetime.utcnow()
+    cfg = await database.get_startup_notify_config()
+
+    accounts = await database.list_avito_accounts(active_only=True)
+    broken = [a for a in accounts if a.last_poll_error]
+    total_chats, unread = await bot_cache.count_chats()
+
+    lines = [
+        "✅ <b>Бот запущен</b>",
+        f"🔹 Время: {utils.to_msk(now).strftime('%d.%m.%Y %H:%M')} МСК",
+        _downtime_line(cfg, now),
+        "",
+        f"🔹 Схема БД: версия {await database.get_schema_version()}",
+        f"🔹 Avito-аккаунты: {len(accounts)} активных"
+        + (f", ⚠️ с ошибкой опроса: {len(broken)}" if broken else ""),
+        f"🔹 Чатов в памяти: {total_chats}, из них непрочитанных: {unread}",
+        f"🔹 Сотрудников на смене: {await database.count_on_shift()}",
+        f"🔹 Отложенных ответов в очереди: {await database.count_pending_scheduled_replies()}",
+        f"🔹 Мини-приложение: {'включено' if webapp_enabled else 'выключено'}",
+    ]
+    if broken:
+        lines.append("")
+        for account in broken:
+            lines.append(f"⚠️ {html.escape(account.name)}: {html.escape(str(account.last_poll_error)[:120])}")
+    return "\n".join(lines)
+
+
+async def send_startup_report(bot: Bot, *, webapp_enabled: bool) -> None:
+    """Tell the owners the bot is back up. Never lets a failure here stop the
+    bot from starting — a status message is not worth a boot loop."""
+    try:
+        cfg = await database.get_startup_notify_config()
+        if not cfg.is_enabled:
+            return
+        if cfg.recipient_telegram_id:
+            recipients = [cfg.recipient_telegram_id]
+        else:
+            recipients = [
+                u.telegram_id
+                for u in await database.list_admins_and_directors()
+                if u.role == constants.DIRECTOR
+            ]
+        if not recipients:
+            return
+        text = await build_startup_report(webapp_enabled=webapp_enabled)
+        for telegram_id in recipients:
+            try:
+                await bot.send_message(telegram_id, text)
+            except TelegramForbiddenError:
+                await database.mark_user_unreachable(telegram_id)
+            except Exception:
+                logger.exception("send_startup_report: failed to notify %s", telegram_id)
+    except Exception:
+        logger.exception("send_startup_report: failed")
+
+
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     accounts = await database.list_avito_accounts(active_only=True)
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
@@ -540,6 +622,7 @@ async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
     tasks.append(asyncio.create_task(_orders_poll_loop(bot)))
     tasks.append(asyncio.create_task(_scheduled_replies_loop(bot)))
+    tasks.append(asyncio.create_task(_heartbeat_loop()))
     return tasks
 
 

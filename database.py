@@ -758,6 +758,54 @@ async def update_welcome_message(text: str, actor_id: int) -> None:
     )
 
 
+# --- startup notification -------------------------------------------------
+
+
+async def get_startup_notify_config() -> models.StartupNotifyConfig:
+    row = await _fetchone("SELECT * FROM startup_notify_config WHERE id = 1")
+    assert row is not None
+    return models.StartupNotifyConfig.from_row(row)
+
+
+async def update_startup_notify_config(actor_id: int | None = None, **fields: Any) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    if actor_id is not None:
+        fields["updated_by"] = actor_id
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    await _execute(f"UPDATE startup_notify_config SET {columns} WHERE id = 1", tuple(fields.values()))
+
+
+async def touch_heartbeat() -> None:
+    """One short write a minute — it is what lets a start report real downtime."""
+    await _execute("UPDATE startup_notify_config SET last_heartbeat_at = datetime('now') WHERE id = 1")
+
+
+async def mark_graceful_stop() -> None:
+    await _execute("UPDATE startup_notify_config SET last_stopped_at = datetime('now') WHERE id = 1")
+
+
+async def count_rows(sql: str, params: Iterable[Any] = ()) -> int:
+    row = await _fetchone(sql, params)
+    return int(row[0]) if row else 0
+
+
+async def count_on_shift() -> int:
+    return await count_rows(
+        "SELECT COUNT(*) FROM users WHERE on_shift = 1 AND status = ?", (constants.STATUS_APPROVED,)
+    )
+
+
+async def count_pending_scheduled_replies() -> int:
+    return await count_rows("SELECT COUNT(*) FROM scheduled_replies WHERE status = 'pending'")
+
+
+async def get_schema_version() -> int:
+    row = await _fetchone("PRAGMA user_version")
+    return int(row[0]) if row else 0
+
+
 # --- chat notes -----------------------------------------------------------
 
 

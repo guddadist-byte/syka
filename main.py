@@ -88,9 +88,17 @@ async def main() -> None:
                 logger.info("Mini App backend listening on %s:%s", static_cfg.webapp_host, static_cfg.webapp_port)
 
             poll_tasks = await tasks.run_all_polls(bot, static_cfg.db_path)
+            # Sent from here, not earlier: by this point the DB, the cache,
+            # the Avito pool, the web server and every poller are up, so the
+            # report describes a bot that is genuinely working.
+            await tasks.send_startup_report(bot, webapp_enabled=bool(static_cfg.webapp_url))
             try:
                 await dp.start_polling(bot)
             finally:
+                # Marks this as a planned stop. A start that finds no such
+                # mark newer than the last heartbeat knows the process died
+                # instead of being deployed over.
+                await database.mark_graceful_stop()
                 await tasks.stop_all(poll_tasks)
                 await avito_client.wait_for_inflight_sends()
         finally:

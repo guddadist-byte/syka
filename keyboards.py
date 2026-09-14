@@ -260,6 +260,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
+    builder.row(InlineKeyboardButton(text="🚀 Уведомление о запуске", callback_data="adm_startup"))
     builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
     return builder.as_markup()
 
@@ -399,6 +400,19 @@ def backup_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="⏱ Периодичность", callback_data="adm_backupinterval"))
     builder.row(InlineKeyboardButton(text="📤 Сделать бэкап сейчас", callback_data="adm_backupnow"))
+    return builder.as_markup()
+
+
+def startup_notify_kb(is_enabled: bool, has_custom_recipient: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🔴 Выключить" if is_enabled else "🟢 Включить", callback_data="adm_startuptoggle"
+        )
+    )
+    builder.row(InlineKeyboardButton(text="👤 Получатель по ID", callback_data="adm_startuprecipient"))
+    if has_custom_recipient:
+        builder.row(InlineKeyboardButton(text="↩️ Слать всем Директорам", callback_data="adm_startupalldirs"))
     return builder.as_markup()
 
 

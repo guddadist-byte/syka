@@ -180,6 +180,21 @@ class BackupConfig:
 
 
 @dataclass
+class StartupNotifyConfig:
+    id: int
+    is_enabled: int
+    recipient_telegram_id: int | None
+    last_heartbeat_at: str | None
+    last_stopped_at: str | None
+    updated_at: str
+    updated_by: int | None
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> "StartupNotifyConfig":
+        return _row(cls, row)
+
+
+@dataclass
 class ChatNote:
     id: int
     chat_id: str

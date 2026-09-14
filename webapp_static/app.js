@@ -226,7 +226,7 @@ function navItems(me) {
 // else under admin* is leadership work open to a РОП.
 const SETTINGS_SCREENS = [
   "adminHome", "adminPoints", "adminPointEdit", "adminAvito", "adminAI",
-  "adminProxy", "adminPayment", "adminWelcome", "adminBackup",
+  "adminProxy", "adminPayment", "adminWelcome", "adminBackup", "adminStartup",
 ];
 
 // Drill-down screens keep their parent section lit rather than clearing the
@@ -1202,6 +1202,7 @@ async function renderAdminHome() {
     ["adminPayment", "star", "Платный доступ"],
     ["adminWelcome", "mail", "Приветственное сообщение"],
     ["adminBackup", "save", "Резервные копии"],
+    ["adminStartup", "refresh", "Уведомление о запуске"],
   ]);
 }
 
@@ -1881,6 +1882,47 @@ async function renderAdminReviews() {
 }
 
 // --- Broadcast -----------------------------------------------------------
+
+SCREENS.adminStartup = renderAdminStartup;
+async function renderAdminStartup() {
+  setHeader("Уведомление о запуске", "", true);
+  loading();
+  try {
+    const cfg = await apiGet("/admin/startup-config");
+    screenRoot.innerHTML = `
+      <div class="card">
+        <div class="card-row">
+          <span>Отчёт при запуске</span>
+          <label class="switch"><input type="checkbox" id="suEnabled" ${cfg.is_enabled ? "checked" : ""}>
+            <span class="track"><span class="thumb"></span></span></label>
+        </div>
+        <div class="preview">После перезапуска бот присылает Директорам отчёт: сколько был
+        недоступен, штатно ли останавливался, состояние Avito-аккаунтов, сколько чатов
+        и отложенных ответов в работе.</div>
+      </div>
+      <div class="card field">
+        <label>Получатель по Telegram ID (пусто — все Директора)</label>
+        <input id="suRecipient" inputmode="numeric" value="${escAttr(cfg.recipient_telegram_id ?? "")}">
+        <button class="btn block small" id="suSave">${ICONS.save} Сохранить</button>
+      </div>
+    `;
+    document.getElementById("suEnabled").addEventListener("change", async (e) => {
+      try {
+        await apiPatch("/admin/startup-config", { is_enabled: e.target.checked });
+        toast("Сохранено");
+      } catch (err) { toast("Ошибка: " + err.message); }
+    });
+    document.getElementById("suSave").addEventListener("click", async () => {
+      const raw = document.getElementById("suRecipient").value.trim();
+      try {
+        await apiPatch("/admin/startup-config", { recipient_telegram_id: raw === "" ? null : raw });
+        toast("Сохранено");
+      } catch (err) { toast("Ошибка: " + err.message); }
+    });
+  } catch (err) {
+    renderError(err, renderAdminStartup);
+  }
+}
 
 SCREENS.adminBroadcast = renderAdminBroadcast;
 async function renderAdminBroadcast() {

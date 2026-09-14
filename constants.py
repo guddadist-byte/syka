@@ -155,6 +155,9 @@ ORDER_POLL_INTERVAL_SECONDS = 120
 # worst-case lateness under half a minute, which is well inside what anyone
 # means by "send this at 18:00".
 SCHEDULED_REPLY_CHECK_INTERVAL_SECONDS = 30
+# Heartbeat granularity. It only exists so a start can say how long the bot
+# was down, so a minute is plenty — and it keeps the write cheap.
+HEARTBEAT_INTERVAL_SECONDS = 60
 # Furthest ahead a reply may be scheduled (a week). Past that it is far more
 # likely a typo in the minutes field than a real intention.
 SCHEDULED_REPLY_MAX_MINUTES = 7 * 24 * 60

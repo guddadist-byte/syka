@@ -1498,6 +1498,32 @@ async def api_admin_welcome_patch(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def api_admin_startup_config_get(request: web.Request) -> web.Response:
+    if (resp := _require_director(request)) is not None:
+        return resp
+    cfg = await database.get_startup_notify_config()
+    return web.json_response({
+        "is_enabled": bool(cfg.is_enabled),
+        "recipient_telegram_id": cfg.recipient_telegram_id,
+        "last_heartbeat_at": cfg.last_heartbeat_at,
+    })
+
+
+async def api_admin_startup_config_patch(request: web.Request) -> web.Response:
+    if (resp := _require_director(request)) is not None:
+        return resp
+    body = await request.json()
+    fields: dict = {}
+    if "is_enabled" in body:
+        fields["is_enabled"] = 1 if body["is_enabled"] else 0
+    if "recipient_telegram_id" in body:
+        raw = body["recipient_telegram_id"]
+        fields["recipient_telegram_id"] = int(raw) if raw not in (None, "") else None
+    if fields:
+        await database.update_startup_notify_config(actor_id=request["user"].telegram_id, **fields)
+    return web.json_response({"ok": True})
+
+
 async def api_admin_backup_config_get(request: web.Request) -> web.Response:
     if (resp := _require_director(request)) is not None:
         return resp
@@ -1756,6 +1782,8 @@ def create_app(bot_token: str, bot=None, db_path: str | None = None) -> web.Appl
     app.router.add_patch("/api/admin/payment-config", api_admin_payment_config_patch)
     app.router.add_get("/api/admin/welcome", api_admin_welcome_get)
     app.router.add_patch("/api/admin/welcome", api_admin_welcome_patch)
+    app.router.add_get("/api/admin/startup-config", api_admin_startup_config_get)
+    app.router.add_patch("/api/admin/startup-config", api_admin_startup_config_patch)
     app.router.add_get("/api/admin/backup-config", api_admin_backup_config_get)
     app.router.add_patch("/api/admin/backup-config", api_admin_backup_config_patch)
     app.router.add_post("/api/admin/backup/run", api_admin_backup_run)

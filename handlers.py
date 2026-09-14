@@ -877,6 +877,24 @@ _media_group_buffer: dict[str, list[Message]] = {}
 _media_group_tasks: dict[str, asyncio.Task] = {}
 
 
+@crm_router.message(
+    ReplyStates.waiting_for_text,
+    F.video_note | F.video | F.voice | F.audio | F.document | F.animation | F.sticker,
+)
+async def reject_unsupported_media(message: Message) -> None:
+    """Avito's chat takes text and photos, nothing else.
+
+    Before this, none of these content types matched any handler — not even
+    the fallback router, which filtered on F.text | F.photo — so a кружочек
+    or a voice note sent here vanished without a word. The state is left
+    open on purpose: the person can type the answer straight away.
+    """
+    await message.answer(
+        "⚠️ В Avito можно отправить только текст и фото.\n"
+        "Кружочки, видео, голосовые и файлы чат Avito не принимает — напишите текстом или пришлите фото."
+    )
+
+
 @crm_router.message(ReplyStates.waiting_for_text, F.photo)
 async def receive_reply_photo(message: Message, state: FSMContext) -> None:
     if message.media_group_id:
@@ -2141,6 +2159,67 @@ async def admin_welcome_text(message: Message, state: FSMContext) -> None:
 # --- admin: backups --------------------------------------------------------
 
 
+async def _show_startup_settings(target: Message) -> None:
+    cfg = await database.get_startup_notify_config()
+    if cfg.recipient_telegram_id:
+        who = f"один получатель: <code>{cfg.recipient_telegram_id}</code>"
+    else:
+        who = "все Директора"
+    text = (
+        f"🚀 Уведомление о запуске: {'включено' if cfg.is_enabled else 'выключено'}\n"
+        f"Получатели: {who}\n\n"
+        "После каждого перезапуска бот присылает отчёт: сколько он был недоступен, "
+        "штатно ли останавливался, состояние Avito-аккаунтов, сколько чатов и "
+        "отложенных ответов в работе."
+    )
+    await target.answer(
+        text, reply_markup=keyboards.startup_notify_kb(bool(cfg.is_enabled), bool(cfg.recipient_telegram_id))
+    )
+
+
+@settings_router.callback_query(F.data == "adm_startup")
+async def cb_admin_startup(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_startup_settings(callback.message)
+
+
+@settings_router.callback_query(F.data == "adm_startuptoggle")
+async def cb_admin_startup_toggle(callback: CallbackQuery) -> None:
+    await callback.answer()
+    cfg = await database.get_startup_notify_config()
+    await database.update_startup_notify_config(
+        actor_id=callback.from_user.id, is_enabled=0 if cfg.is_enabled else 1
+    )
+    await _show_startup_settings(callback.message)
+
+
+@settings_router.callback_query(F.data == "adm_startupalldirs")
+async def cb_admin_startup_all_dirs(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await database.update_startup_notify_config(actor_id=callback.from_user.id, recipient_telegram_id=None)
+    await _show_startup_settings(callback.message)
+
+
+@settings_router.callback_query(F.data == "adm_startuprecipient")
+async def cb_admin_startup_recipient(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_startup_recipient)
+    await callback.message.answer(
+        "Пришлите Telegram ID получателя отчёта о запуске.", reply_markup=keyboards.cancel_kb()
+    )
+
+
+@settings_router.message(AdminStates.waiting_for_startup_recipient, SafeFreeText())
+async def receive_startup_recipient(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    raw = message.text.strip()
+    if not raw.lstrip("-").isdigit():
+        await message.answer("Нужен числовой Telegram ID.")
+        return
+    await database.update_startup_notify_config(actor_id=message.from_user.id, recipient_telegram_id=int(raw))
+    await _show_startup_settings(message)
+
+
 @settings_router.callback_query(F.data == "adm_backup")
 async def cb_admin_backup(callback: CallbackQuery) -> None:
     await callback.answer()
@@ -2615,7 +2694,7 @@ async def receive_order_confirm_code(message: Message, state: FSMContext) -> Non
 fallback_router = Router(name="fallback")
 
 
-@fallback_router.message(F.text | F.photo)
+@fallback_router.message()
 async def unexpected_input(message: Message) -> None:
     user = await database.get_user(message.from_user.id)
     if user is None:
