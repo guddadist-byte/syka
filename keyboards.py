@@ -105,7 +105,8 @@ def chat_detail_kb(short_id: str, can_reassign: bool = False) -> InlineKeyboardM
         InlineKeyboardButton(text="📋 Шаблоны", callback_data=f"{constants.PREFIX_TPL}_{short_id}"),
     )
     builder.row(
-        InlineKeyboardButton(text="⏰ Отправить позже", callback_data=f"{constants.PREFIX_LATER}_{short_id}")
+        InlineKeyboardButton(text="⏰ Отправить позже", callback_data=f"{constants.PREFIX_LATER}_{short_id}"),
+        InlineKeyboardButton(text="📝 Заметки", callback_data=f"{constants.PREFIX_NOTES}_{short_id}"),
     )
     if can_reassign:
         builder.row(
@@ -130,6 +131,23 @@ LATER_PRESETS: list[tuple[str, str]] = [
     ("3 часа", "180"),
     ("Завтра 09:00", "09:00"),
 ]
+
+
+def chat_notes_kb(short_id: str, notes: list, can_delete_ids: set[int]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить заметку", callback_data=f"{constants.PREFIX_NOTEADD}_{short_id}")
+    )
+    for note in notes:
+        if note.id in can_delete_ids:
+            preview = note.text[:24] + ("…" if len(note.text) > 24 else "")
+            builder.row(
+                InlineKeyboardButton(
+                    text=f"🗑 {preview}", callback_data=f"{constants.PREFIX_NOTEDEL}_{note.id}:{short_id}"
+                )
+            )
+    builder.row(InlineKeyboardButton(text=constants.BTN_BACK, callback_data=f"{constants.PREFIX_CHAT}_{short_id}"))
+    return builder.as_markup()
 
 
 def later_time_kb(short_id: str) -> InlineKeyboardMarkup:

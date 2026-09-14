@@ -422,6 +422,55 @@ function renderError(err, retry) {
 
 // --- Chats list --------------------------------------------------------------
 
+// Internal notes. Deliberately styled apart from the message bubbles: the
+// one thing that must never be in doubt is that the customer cannot see
+// these.
+function renderNotes(notes) {
+  const rows = (notes || []).map(n => `
+    <div class="note-row">
+      <span class="note-icon">${ICONS.doc}</span>
+      <span class="note-text">${esc(n.text)}
+        <span class="note-meta">${esc(n.created_label)} · ${esc(n.author_name)}</span>
+      </span>
+      ${n.can_delete ? `<button class="sched-cancel" data-note-del="${n.id}" aria-label="Удалить">${ICONS.x}</button>` : ""}
+    </div>`).join("");
+  return rows + `<button class="note-add" id="noteAddBtn">${ICONS.plus} Заметка для команды</button>`;
+}
+
+function wireNotes(params) {
+  document.querySelectorAll("[data-note-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      try {
+        await apiDelete(`/notes/${btn.dataset.noteDel}`);
+        renderChatDetail(params);
+      } catch (err) { toast("Ошибка: " + err.message); }
+    });
+  });
+  const addBtn = document.getElementById("noteAddBtn");
+  if (!addBtn) return;
+  addBtn.addEventListener("click", () => {
+    const box = document.getElementById("notesBox");
+    if (box.querySelector("#noteInput")) return;
+    const form = document.createElement("div");
+    form.className = "card field";
+    form.innerHTML = `
+      <label>Заметку видит только команда, клиенту она не уходит</label>
+      <textarea id="noteInput" rows="2" placeholder="Например: торгуется, минимум 15000"></textarea>
+      <button class="btn block small" id="noteSave">Сохранить</button>`;
+    box.appendChild(form);
+    const input = document.getElementById("noteInput");
+    input.focus();
+    document.getElementById("noteSave").addEventListener("click", async () => {
+      const text = input.value.trim();
+      if (!text) { toast("Пустая заметка"); return; }
+      try {
+        await apiPost(`/chats/${params.shortId}/notes`, { text });
+        renderChatDetail(params);
+      } catch (err) { toast("Ошибка: " + err.message); }
+    });
+  });
+}
+
 // Kept in step with keyboards.LATER_PRESETS on the bot side — both send the
 // same strings to the same parser (utils.parse_send_at).
 const LATER_PRESETS = [
@@ -503,6 +552,7 @@ async function renderChatDetail(params) {
             <span>${ICONS.box} ${chat.item_url ? `<a href="${esc(chat.item_url)}" target="_blank" style="color:var(--accent-2)">${esc(chat.item_title)}</a>` : esc(chat.item_title)}</span>
           </div>
         </div>` : ""}
+      <div id="notesBox">${renderNotes(chat.notes)}</div>
       <div id="schedBox">${renderScheduled(chat.scheduled)}</div>
       <div class="messages" id="msgList">
         ${(() => {
@@ -556,6 +606,7 @@ async function renderChatDetail(params) {
     const replyText = document.getElementById("replyText");
     const sendBtn = document.getElementById("sendBtn");
     wireScheduled(params);
+    wireNotes(params);
 
     // "Отправить позже": the text is already in the box, so this only asks
     // when. Presets cover the common answers; the free field takes the same

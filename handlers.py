@@ -126,6 +126,14 @@ async def _render_chat_detail(target: Message, chat: bot_cache.CachedChat, state
     if not chat.messages:
         lines.append("(сообщений пока нет)")
 
+    # Notes sit above the queued replies: they are what the person reading
+    # this chat needs before they answer, not after.
+    notes = await database.list_chat_notes(chat.chat_id)
+    if notes:
+        lines.append("")
+        for note in notes:
+            lines.append(f"📝 <i>{html.escape(note.text)}</i>")
+
     # A queued reply has to be visible here, or it is a message about to go
     # to a customer that nobody can see coming or call back.
     scheduled = await database.list_scheduled_replies_for_chat(chat.chat_id)
@@ -542,6 +550,81 @@ async def open_chat(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await _refresh_chat_from_avito(chat)
     await _render_chat_detail(callback.message, chat, state, callback.from_user.id)
+
+
+async def _show_chat_notes(target: Message, short_id: str, actor_id: int) -> None:
+    chat = await bot_cache.resolve_chat(short_id)
+    if chat is None:
+        await target.answer("Чат больше не доступен.")
+        return
+    notes = await database.list_chat_notes(chat.chat_id)
+    actor = await database.get_user(actor_id)
+    is_lead = bool(actor and constants.ROLE_ORDER.get(actor.role, 0) >= constants.ROLE_ORDER[constants.ADMIN])
+    # Anyone may add a note; removing one is limited to its author and to
+    # РОП+ — a note is somebody else's working knowledge, not a scratchpad.
+    deletable = {n.id for n in notes if is_lead or n.author_id == actor_id}
+
+    lines = [f"📝 Заметки по чату с «{html.escape(chat.client_name or 'клиент')}»", ""]
+    if notes:
+        for note in notes:
+            author = await database.get_user(note.author_id) if note.author_id else None
+            who = html.escape(author.full_name or str(author.telegram_id)) if author else "—"
+            lines.append(f"• <i>{html.escape(note.text)}</i>")
+            lines.append(f"  <code>{utils.format_msk(note.created_at)}</code> · {who}")
+    else:
+        lines.append("Пока пусто. Заметки видит только команда — клиенту они не уходят.")
+
+    await target.answer("\n".join(lines), reply_markup=keyboards.chat_notes_kb(short_id, notes, deletable))
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_NOTES}_"))
+async def cb_chat_notes(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, short_id = callback.data.split("_", 1)
+    await _show_chat_notes(callback.message, short_id, callback.from_user.id)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_NOTEADD}_"))
+async def cb_chat_note_add(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    _, short_id = callback.data.split("_", 1)
+    if await bot_cache.resolve_chat(short_id) is None:
+        await callback.message.answer("Чат больше не доступен.")
+        return
+    await state.set_state(ReplyStates.waiting_for_note)
+    await state.update_data(chat_short_id=short_id)
+    await callback.message.answer(
+        "📝 Напишите заметку. Её увидит только команда — клиенту она не уйдёт.",
+        reply_markup=keyboards.cancel_kb(),
+    )
+
+
+@crm_router.message(ReplyStates.waiting_for_note, SafeFreeText())
+async def receive_chat_note(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    short_id = data.get("chat_short_id")
+    chat = await bot_cache.resolve_chat(short_id) if short_id else None
+    await state.clear()
+    if chat is None:
+        await message.answer("Чат больше не доступен.")
+        return
+    await database.create_chat_note(chat.chat_id, message.from_user.id, message.text)
+    await _show_chat_notes(message, short_id, message.from_user.id)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_NOTEDEL}_"))
+async def cb_chat_note_delete(callback: CallbackQuery) -> None:
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    raw_id, short_id = payload.split(":", 1)
+    note = await database.get_chat_note(int(raw_id))
+    actor = await database.get_user(callback.from_user.id)
+    is_lead = bool(actor and constants.ROLE_ORDER.get(actor.role, 0) >= constants.ROLE_ORDER[constants.ADMIN])
+    if note is None or not (is_lead or note.author_id == callback.from_user.id):
+        await callback.message.answer("Эту заметку может удалить только её автор или руководитель.")
+        return
+    await database.delete_chat_note(note.id)
+    await _show_chat_notes(callback.message, short_id, callback.from_user.id)
 
 
 @crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_LATER}_"))

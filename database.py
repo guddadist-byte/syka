@@ -758,6 +758,47 @@ async def update_welcome_message(text: str, actor_id: int) -> None:
     )
 
 
+# --- chat notes -----------------------------------------------------------
+
+
+async def create_chat_note(chat_id: str, author_id: int, text: str) -> int:
+    cur = await _execute(
+        "INSERT INTO chat_notes (chat_id, author_id, text) VALUES (?, ?, ?)",
+        (chat_id, author_id, text),
+    )
+    return int(cur.lastrowid)
+
+
+async def list_chat_notes(chat_id: str) -> list[models.ChatNote]:
+    rows = await _fetchall(
+        "SELECT * FROM chat_notes WHERE chat_id = ? ORDER BY created_at, id", (chat_id,)
+    )
+    return [models.ChatNote.from_row(r) for r in rows]
+
+
+async def get_chat_note(note_id: int) -> models.ChatNote | None:
+    row = await _fetchone("SELECT * FROM chat_notes WHERE id = ?", (note_id,))
+    return models.ChatNote.from_row(row) if row else None
+
+
+async def delete_chat_note(note_id: int) -> bool:
+    cur = await _execute("DELETE FROM chat_notes WHERE id = ?", (note_id,))
+    return cur.rowcount == 1
+
+
+async def chat_ids_with_notes(chat_ids: list[str]) -> set[str]:
+    """Which of these chats carry at least one note — one query for a whole
+    list screen, rather than a per-row lookup."""
+    if not chat_ids:
+        return set()
+    placeholders = ",".join("?" for _ in chat_ids)
+    rows = await _fetchall(
+        f"SELECT DISTINCT chat_id FROM chat_notes WHERE chat_id IN ({placeholders})",
+        tuple(chat_ids),
+    )
+    return {r["chat_id"] for r in rows}
+
+
 # --- scheduled replies ----------------------------------------------------
 
 

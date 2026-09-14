@@ -180,6 +180,19 @@ class BackupConfig:
 
 
 @dataclass
+class ChatNote:
+    id: int
+    chat_id: str
+    author_id: int | None
+    text: str
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> "ChatNote":
+        return _row(cls, row)
+
+
+@dataclass
 class ScheduledReply:
     id: int
     chat_id: str

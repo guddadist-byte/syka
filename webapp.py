@@ -235,6 +235,23 @@ def _serialize_chat(chat: bot_cache.CachedChat, *, with_messages: bool = False) 
     return data
 
 
+async def _serialize_notes(chat_id: str, actor: models.User) -> list[dict]:
+    is_lead = _has_role_at_least(actor, constants.ADMIN)
+    result = []
+    for note in await database.list_chat_notes(chat_id):
+        author = await database.get_user(note.author_id) if note.author_id else None
+        result.append({
+            "id": note.id,
+            "text": note.text,
+            "author_name": (author.full_name if author else None) or "—",
+            "created_label": utils.format_msk(note.created_at),
+            # Anyone may add a note; removing one is limited to its author
+            # and to РОП+ — it is somebody else's working knowledge.
+            "can_delete": is_lead or note.author_id == actor.telegram_id,
+        })
+    return result
+
+
 async def _serialize_scheduled(chat_id: str) -> list[dict]:
     return [
         {
@@ -373,6 +390,7 @@ async def api_chat_detail(request: web.Request) -> web.Response:
     await _refresh_chat_from_avito(chat)
     data = _serialize_chat(chat, with_messages=True)
     data["scheduled"] = await _serialize_scheduled(chat.chat_id)
+    data["notes"] = await _serialize_notes(chat.chat_id, request["user"])
     return web.json_response(data)
 
 
@@ -441,6 +459,31 @@ async def api_chat_reply(request: web.Request) -> web.Response:
         "time_label": utils.to_msk(now).strftime("%H:%M"),
         "day_label": utils.msk_day_label(now),
     })
+
+
+async def api_chat_note_create(request: web.Request) -> web.Response:
+    """Add an internal note. It is stored and rendered by our own screens
+    only — nothing here goes anywhere near avito_client."""
+    user: models.User = request["user"]
+    chat = await bot_cache.resolve_chat(request.match_info["short_id"])
+    if chat is None:
+        return web.json_response({"error": "not_found"}, status=404)
+    text = ((await request.json()).get("text") or "").strip()
+    if not text:
+        return web.json_response({"error": "empty_text"}, status=400)
+    note_id = await database.create_chat_note(chat.chat_id, user.telegram_id, text)
+    return web.json_response({"ok": True, "id": note_id})
+
+
+async def api_chat_note_delete(request: web.Request) -> web.Response:
+    user: models.User = request["user"]
+    note = await database.get_chat_note(int(request.match_info["note_id"]))
+    if note is None:
+        return web.json_response({"error": "not_found"}, status=404)
+    if not (_has_role_at_least(user, constants.ADMIN) or note.author_id == user.telegram_id):
+        return web.json_response({"error": "forbidden"}, status=403)
+    await database.delete_chat_note(note.id)
+    return web.json_response({"ok": True})
 
 
 async def api_chat_schedule(request: web.Request) -> web.Response:
@@ -1665,6 +1708,8 @@ def create_app(bot_token: str, bot=None, db_path: str | None = None) -> web.Appl
     app.router.add_get("/api/chats/{short_id}/templates", api_chat_templates)
     app.router.add_post("/api/chats/{short_id}/templates/{template_id}/apply", api_chat_template_apply)
     app.router.add_delete("/api/messages/{msg_ref}", api_message_delete)
+    app.router.add_post("/api/chats/{short_id}/notes", api_chat_note_create)
+    app.router.add_delete("/api/notes/{note_id}", api_chat_note_delete)
     app.router.add_post("/api/chats/{short_id}/schedule", api_chat_schedule)
     app.router.add_delete("/api/scheduled/{reply_id}", api_scheduled_cancel)
 

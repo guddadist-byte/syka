@@ -12,6 +12,7 @@ class ReplyStates(StatesGroup):
     # for a moment before there is anything to send would be backwards.
     waiting_for_later_text = State()
     waiting_for_later_time = State()
+    waiting_for_note = State()
 
 
 class AIStates(StatesGroup):
