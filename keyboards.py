@@ -451,16 +451,30 @@ def orders_refresh_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]], with_refresh: bool = False) -> InlineKeyboardMarkup:
+def orders_menu_kb(
+    orders_with_accounts: list[tuple[dict, int]],
+    with_refresh: bool = False,
+    unassigned_count: int = 0,
+    back: bool = False,
+) -> InlineKeyboardMarkup:
     """One button per order — status + item name, like chat_list_kb.
     Tapping one opens its detail card (see order_detail_kb).
 
-    with_refresh puts the refresh row on exactly one of the two lists the
-    orders screen can print, so the button appears once rather than twice.
+    unassigned_count collapses the orders whose point could not be resolved
+    into a single counter row leading to their own screen: with no default
+    point set on a cabinet that pile holds every order that arrived without
+    a chat, and listing it inline buried the orders the employee opened the
+    screen for.
     """
     builder = InlineKeyboardBuilder()
     if with_refresh:
         builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data=constants.PREFIX_ORDREFRESH))
+    if unassigned_count:
+        builder.row(
+            InlineKeyboardButton(
+                text=f"📍 Без точки: {unassigned_count}", callback_data=constants.PREFIX_ORDUNASSIGNED
+            )
+        )
     for order, account_id in orders_with_accounts:
         order_id = order.get("id")
         status_label = constants.ORDER_STATUS_LABELS.get(order.get("status", ""), "📦")
@@ -468,6 +482,8 @@ def orders_menu_kb(orders_with_accounts: list[tuple[dict, int]], with_refresh: b
         title = (items[0].get("title") if items else None) or "(без названия)"
         label = f"{status_label} {title[:40]}"
         builder.row(InlineKeyboardButton(text=label, callback_data=f"ordview_{order_id}:{account_id}"))
+    if back:
+        builder.row(InlineKeyboardButton(text="◀️ Назад", callback_data="ordback"))
     return builder.as_markup()
 
 

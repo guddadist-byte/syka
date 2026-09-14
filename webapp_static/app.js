@@ -234,7 +234,7 @@ const SETTINGS_SCREENS = [
 function navIdFor(screen, params) {
   if (screen === "chats") return "chats:" + ((params && params.filter) || "unread");
   if (screen === "chatDetail") return null;      // keep whichever chats entry is lit
-  if (screen === "orderDetail") return "orders";
+  if (screen === "orderDetail" || screen === "ordersUnassigned") return "orders";
   // Settings screens belong to the director's menu; every other admin
   // screen is leadership work and lights that entry instead.
   if (SETTINGS_SCREENS.indexOf(screen) >= 0) return "adminHome";
@@ -886,20 +886,56 @@ async function renderOrders(params) {
     screenRoot.innerHTML = `
       <button class="btn secondary small" id="ordRefresh">${ICONS.refresh} Обновить</button>
       ${notes.length ? `<div class="preview" style="padding:0 4px">${notes.map(esc).join("<br>")}</div>` : ""}
-      ${mine.length ? mine.map(card).join("") : ""}
       ${unassigned.length ? `
-        <div class="section-title">Точка не определена: ${unassigned.length}</div>
-        <div class="preview" style="padding:0 4px">Заказы пришли без переписки с покупателем.
-        Задайте точку по умолчанию для кабинета в «Настройки → Avito API».</div>
-        ${unassigned.map(card).join("")}` : ""}
-      ${!data.orders.length ? '<div class="empty-state">Активных заказов нет</div>' : ""}
+        <button class="list-btn" id="ordUnassigned">
+          <div class="row-top">
+            <span class="name">${ICONS.pinOff}Без точки</span>
+            <span class="unread-dot">${unassigned.length}</span>
+          </div>
+        </button>` : ""}
+      ${mine.map(card).join("")}
+      ${!mine.length && !unassigned.length ? '<div class="empty-state">Активных заказов нет</div>' : ""}
+      ${!mine.length && unassigned.length ? '<div class="empty-state">По вашим точкам активных заказов нет</div>' : ""}
     `;
     document.getElementById("ordRefresh").addEventListener("click", () => renderOrders({ fresh: true }));
+    const unassignedBtn = document.getElementById("ordUnassigned");
+    if (unassignedBtn) unassignedBtn.addEventListener("click", () => go("ordersUnassigned", {}));
     screenRoot.querySelectorAll("[data-order]").forEach(btn => {
       btn.addEventListener("click", () => go("orderDetail", { orderId: btn.dataset.order, accountId: btn.dataset.account }));
     });
   } catch (err) {
     renderError(err, renderOrders);
+  }
+}
+
+// Orders whose point could not be resolved, on a screen of their own — the
+// pile can be long, and it was burying the orders people come here for.
+SCREENS.ordersUnassigned = renderOrdersUnassigned;
+async function renderOrdersUnassigned(params) {
+  setHeader("Заказы без точки", "", true);
+  loading();
+  try {
+    const data = await apiGet(`/orders${params && params.fresh ? "?fresh=1" : ""}`);
+    const unassigned = data.orders.filter(o => o.unassigned);
+    screenRoot.innerHTML = `
+      <button class="btn secondary small" id="ordUnRefresh">${ICONS.refresh} Обновить</button>
+      <div class="preview" style="padding:0 4px">Заказы пришли без переписки с покупателем,
+      привязать их не к чему. Задайте точку по умолчанию для кабинета в
+      «Настройки → Avito API» — следующие такие заказы встанут на место сами.</div>
+      ${unassigned.map(o => `
+        <button class="list-btn" data-order="${escAttr(o.id)}" data-account="${escAttr(o.account_id)}">
+          <div class="row-top"><span class="name">${esc(o.status_label)}</span></div>
+          <div class="preview">${esc(o.title)} · ${esc(o.account_name || "")}</div>
+        </button>`).join("")}
+      ${!unassigned.length ? '<div class="empty-state">Заказов без точки нет</div>' : ""}
+    `;
+    document.getElementById("ordUnRefresh").addEventListener(
+      "click", () => renderOrdersUnassigned({ fresh: true }));
+    screenRoot.querySelectorAll("[data-order]").forEach(btn => {
+      btn.addEventListener("click", () => go("orderDetail", { orderId: btn.dataset.order, accountId: btn.dataset.account }));
+    });
+  } catch (err) {
+    renderError(err, renderOrdersUnassigned);
   }
 }
 

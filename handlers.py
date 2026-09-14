@@ -2407,12 +2407,21 @@ async def show_orders_menu(message: Message) -> None:
     await _show_all_orders(message, message.from_user.id)
 
 
-async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = False) -> None:
-    accounts = await database.list_avito_accounts(active_only=True)
-    if not accounts:
-        await message.answer("Нет подключённых Avito-аккаунтов.")
-        return
+UNASSIGNED_HINT = (
+    "Эти заказы пришли без переписки с покупателем, привязать их не к чему. "
+    "Задайте точку по умолчанию для кабинета в «⚙️ Настройки → 🔑 Avito API», "
+    "и следующие такие заказы встанут на место сами."
+)
 
+
+async def _collect_orders(
+    actor_id: int, *, fresh: bool = False
+) -> tuple[list[tuple[dict, int]], list[tuple[dict, int]], int, list[str], set[int]]:
+    """Split this user's active orders into (mine, unassigned, …).
+
+    Shared by the orders list and its "без точки" submenu so the two can
+    never disagree about which order belongs where.
+    """
     actor = await database.get_user(actor_id)
     point_ids = await _point_ids_for_user(actor) if actor else set()
 
@@ -2420,14 +2429,14 @@ async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = Fal
     unassigned: list[tuple[dict, int]] = []
     other_points = 0
     errors: list[str] = []
-    for account in accounts:
+    for account in await database.list_avito_accounts(active_only=True):
         client = avito_client.get_pool().get(account.id)
         if client is None:
             continue
         try:
             orders = await client.get_orders(statuses=constants.ORDER_ACTIVE_STATUSES, use_cache=not fresh)
         except avito_client.AvitoAPIError as exc:
-            logger.exception("_show_all_orders: failed for account %s", account.id)
+            logger.exception("_collect_orders: failed for account %s", account.id)
             errors.append(f"{account.name}: {exc}")
             continue
         for order in orders:
@@ -2442,6 +2451,15 @@ async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = Fal
                 unassigned.append((order, account.id))
             else:
                 other_points += 1
+    return mine, unassigned, other_points, errors, point_ids
+
+
+async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = False) -> None:
+    if not await database.list_avito_accounts(active_only=True):
+        await message.answer("Нет подключённых Avito-аккаунтов.")
+        return
+
+    mine, unassigned, other_points, errors, point_ids = await _collect_orders(actor_id, fresh=fresh)
 
     if not mine and not unassigned:
         # Never just "нет заказов": that read the same whether the account
@@ -2456,22 +2474,33 @@ async def _show_all_orders(message: Message, actor_id: int, *, fresh: bool = Fal
         await message.answer("\n".join(lines), reply_markup=keyboards.orders_refresh_kb())
         return
 
+    # One message, one screen. The unassigned ones live behind a single
+    # counter row rather than crowding out the orders the employee came
+    # here for — with no default point on a cabinet, every order without a
+    # chat lands in that pile, and it can be long.
     if mine:
         text = f"📦 Ваши заказы: {len(mine)}"
-        if other_points:
-            text += f"\nСкрыто заказов других точек: {other_points}"
-        if errors:
-            text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
-        await message.answer(text, reply_markup=keyboards.orders_menu_kb(mine, with_refresh=True))
+    else:
+        text = "📦 Активных заказов по вашим точкам нет."
+    if other_points:
+        text += f"\nСкрыто заказов других точек: {other_points}"
+    if errors:
+        text += "\n\n⚠️ Не удалось получить заказы от:\n" + "\n".join(errors)
+    await message.answer(
+        text,
+        reply_markup=keyboards.orders_menu_kb(mine, with_refresh=True, unassigned_count=len(unassigned)),
+    )
 
-    if unassigned:
-        await message.answer(
-            f"📍 Точка не определена: {len(unassigned)}\n"
-            "Эти заказы пришли без переписки с покупателем, привязать их не к чему. "
-            "Задайте точку по умолчанию для кабинета в «⚙️ Настройки → 🔑 Avito API», "
-            "и следующие такие заказы встанут на место сами.",
-            reply_markup=keyboards.orders_menu_kb(unassigned, with_refresh=not mine),
-        )
+
+async def _show_unassigned_orders(message: Message, actor_id: int, *, fresh: bool = False) -> None:
+    _mine, unassigned, _other, _errors, _points = await _collect_orders(actor_id, fresh=fresh)
+    if not unassigned:
+        await message.answer("📍 Заказов без точки нет.", reply_markup=keyboards.orders_refresh_kb())
+        return
+    await message.answer(
+        f"📍 Точка не определена: {len(unassigned)}\n{UNASSIGNED_HINT}",
+        reply_markup=keyboards.orders_menu_kb(unassigned, with_refresh=True, back=True),
+    )
 
 
 async def _show_order_detail(message: Message, order_id: str, account_id: int, *, fresh: bool = False) -> None:
@@ -2573,6 +2602,12 @@ async def cb_order_view(callback: CallbackQuery) -> None:
 async def cb_order_back(callback: CallbackQuery) -> None:
     await callback.answer()
     await _show_all_orders(callback.message, callback.from_user.id)
+
+
+@crm_router.callback_query(F.data == constants.PREFIX_ORDUNASSIGNED)
+async def cb_orders_unassigned(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_unassigned_orders(callback.message, callback.from_user.id)
 
 
 @crm_router.callback_query(F.data == constants.PREFIX_ORDREFRESH)
