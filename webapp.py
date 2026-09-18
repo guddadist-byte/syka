@@ -34,6 +34,7 @@ from aiohttp import web
 import ai_client
 import avito_client
 import bot_cache
+import chat_sync
 import constants
 import database
 import guardrail
@@ -355,41 +356,10 @@ async def api_chats(request: web.Request) -> web.Response:
 
 
 async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
-    """Mirrors handlers.py's _refresh_chat_from_avito — kept as a separate
-    copy rather than a shared import since webapp.py and handlers.py are
-    deliberately independent of each other (see the project's import
-    graph). Live-syncs is_read from Avito for messages this chat already
-    knows about, since background polling short-circuits chats it already
-    believes are fully read to save API calls — fine for the ambient list,
-    but a chat someone is actually opening deserves the real current state.
-
-    Deliberately uses bot_cache.sync_is_read(), NOT add_message(): this
-    path has no durable known_ids/database.append_message() pairing of its
-    own (that lives in tasks._process_chat), so it must never be the thing
-    that first discovers a brand-new message — doing so previously made
-    such a message "known" only in memory, invisible to the DB, and it
-    would resurface as a false "new" message and re-notify after the next
-    restart. A genuinely new message is picked up by the next poll cycle
-    (seconds away) exactly as before."""
-    client = avito_client.get_pool().get(chat.avito_account_id)
-    if client is None:
-        return
-    try:
-        messages = await client.get_messages(chat.chat_id)
-    except avito_client.AvitoAPIError:
-        return
-    for m in messages:
-        if m.message_id is not None:
-            await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read, image_url=m.image_url)
-            if m.image_url:
-                # Persist the attachment URL, not just cache it. The poller
-                # used to be the one backfilling these, but it only did so
-                # as a side effect of re-fetching every fully-read chat on
-                # every cycle — the very cost this round removed. Doing it
-                # here keeps the capability at no cost to the poll loop:
-                # chat opens are human-paced, and the UPDATE only ever
-                # fills a blank (see set_message_image_url).
-                await database.set_message_image_url(m.message_id, m.image_url)
+    """Thin wrapper kept so the existing call sites read unchanged; the
+    logic, and the reasoning behind it, live in chat_sync (shared with the
+    bot, which has the same two entry points)."""
+    await chat_sync.refresh_chat_from_avito(chat)
 
 
 async def api_chat_detail(request: web.Request) -> web.Response:

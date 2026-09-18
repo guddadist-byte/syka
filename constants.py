@@ -145,7 +145,19 @@ START_COOLDOWN_SECONDS = 30
 DOUBLE_CLICK_TTL_SECONDS = 3.0
 
 POLL_INTERVAL_SECONDS = 15
-FULL_SYNC_EVERY_N_POLLS = 20
+# Most cycles ask Avito only for its own unread chats; every Nth asks for
+# all of them. The full pass is the ONLY way this bot ever sees a chat that
+# has left Avito's unread list — which is exactly what happens when someone
+# reads and answers a client directly in Avito's own app. So this interval
+# is the ceiling on how long such a reply stays missing from the ambient
+# list, and it used to be 20 (~5 minutes).
+#
+# 8 (~2 minutes) is affordable now and was not before: a full pass used to
+# cost one throttled get_messages() per chat, because the messages table did
+# not persist is_read and nothing could short-circuit. Since migration 015
+# it does, so the overwhelming majority of chats on a full pass take the
+# short exit and cost nothing.
+FULL_SYNC_EVERY_N_POLLS = 8
 # Safety ceiling for GET .../chats pagination during polling (100/page).
 # Avito's own OpenAPI spec caps the offset parameter at 1000, so 10 pages
 # (offset up to 900) is the real usable ceiling, not an arbitrary guess.
@@ -163,9 +175,14 @@ CHAT_POLL_MAX_PAGES = 10
 # 100 unread chats that is a ~2 minute cycle, and a brand-new message waits
 # a full cycle plus its place in the queue.
 #
-# 120s keeps the "read in Avito directly" reconciliation well inside the
-# couple of minutes anyone would notice, while cutting the dominant cost by
-# 8x at POLL_INTERVAL_SECONDS=15.
+# 120s cuts that dominant cost by 8x at POLL_INTERVAL_SECONDS=15.
+#
+# Note what this pacing does and does not cover: it only applies to chats
+# Avito still returns as unread. A chat someone read AND answered in Avito's
+# own app usually leaves that list altogether, so it is not reconciled here
+# at all — it waits for the full pass (FULL_SYNC_EVERY_N_POLLS above). An
+# earlier version of this comment claimed the reconciliation was bounded by
+# these 120s in general; that was true only for the still-unread case.
 UNREAD_RECHECK_SECONDS = 120
 ACCOUNT_RELOAD_INTERVAL_SECONDS = 300
 MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
