@@ -52,6 +52,10 @@ class CachedChat:
     last_replied_at: datetime | None = None
     last_replied_by: int | None = None
     last_read_at: datetime | None = None
+    # When a live get_messages() last confirmed this chat's state against
+    # Avito. Used by tasks._process_chat to re-verify a still-unread chat
+    # periodically instead of on every single poll cycle.
+    last_polled_at: datetime | None = None
 
 
 _chats: dict[str, CachedChat] = {}
@@ -137,18 +141,21 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
             )
             if initial_messages:
                 chat.messages.extend(initial_messages)
-                # Deliberately NOT setting chat.last_message_at here: these
-                # messages' is_read defaults to True (the messages table
-                # doesn't persist Avito's real flag), so unread_count below
-                # is 0 until a live poll confirms otherwise. If
-                # last_message_at were set too, _process_chat's
-                # short-circuit ("nothing new since last_message_at and
-                # already 0 unread") would see it as already up to date and
-                # skip the one get_messages() call that could ever correct
-                # that default — leaving it None forces exactly one real
-                # poll per chat after a restart (add_message sets a real,
-                # confirmed value once that happens).
                 chat.unread_count = _real_unread_count(chat.messages)
+                # Setting last_message_at here is only correct BECAUSE the
+                # messages table now persists Avito's real is_read
+                # (migration 015), so unread_count above is the truth and
+                # not a default. It used to be left None on purpose: with
+                # is_read defaulting to True, every hydrated chat looked
+                # read, and skipping the poll would have frozen that wrong
+                # answer in place. The cost of that workaround was a
+                # get_messages() for EVERY chat on the first pass after
+                # every restart — one throttled request each, minutes of
+                # saturated budget with real new messages queued behind it.
+                # Restoring it here is what removes that burst; it must
+                # never be restored without honest is_read, or the
+                # "Непрочитанные is always empty" regression comes back.
+                chat.last_message_at = chat.messages[-1].created_at
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:
@@ -164,6 +171,17 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
             if item_url is not None:
                 chat.item_url = item_url
         return chat
+
+
+async def mark_polled(chat_id: str, at: datetime | None = None) -> None:
+    """Records that a live get_messages() just confirmed this chat.
+
+    Only used to pace the re-verification of chats we still count as
+    unread — see tasks._process_chat's short-circuit."""
+    async with _lock:
+        chat = _chats.get(chat_id)
+        if chat is not None:
+            chat.last_polled_at = at or datetime.utcnow()
 
 
 async def get_chat(chat_id: str) -> CachedChat | None:

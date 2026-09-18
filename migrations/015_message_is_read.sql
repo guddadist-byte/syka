@@ -1,0 +1,15 @@
+-- Persist Avito's own is_read flag on every stored message.
+--
+-- Until now the flag lived only in bot_cache, so after a restart
+-- tasks._build_initial_messages had to fall back to CachedMessage's
+-- is_read=True default. That default is what forced upsert_chat to leave
+-- last_message_at unset (see bot_cache.upsert_chat) — which in turn made
+-- _process_chat re-fetch every single chat on the first pass after every
+-- restart, one throttled request per chat, minutes of saturated budget
+-- while real new messages queued behind it.
+--
+-- DEFAULT 1 ("read") is deliberate for the backfill: rows written before
+-- this migration carry no real state, and treating them as unread would
+-- wake everyone with notifications about an old archive — the exact
+-- accident this project has already had twice.
+ALTER TABLE messages ADD COLUMN is_read INTEGER NOT NULL DEFAULT 1;

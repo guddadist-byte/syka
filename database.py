@@ -1062,14 +1062,32 @@ async def get_unread_chats(point_ids: set[int] | None) -> list[models.ChatSummar
 
 async def append_message(chat_id: str, direction: str, text: str | None, has_image: bool, sent_at: str,
                           avito_message_id: str | None = None, message_uuid: str | None = None,
-                          image_url: str | None = None) -> None:
+                          image_url: str | None = None, is_read: bool = True) -> None:
+    """is_read defaults to True so the send paths (which write our own
+    outgoing messages) don't have to pass it; only the poller, which has
+    Avito's real flag, passes False."""
     await _execute(
         """
-        INSERT INTO messages (chat_id, avito_message_id, message_uuid, direction, text, has_image, image_url, sent_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (chat_id, avito_message_id, message_uuid, direction, text, has_image, image_url, sent_at, is_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (chat_id, avito_message_id, message_uuid, direction, text,
-         1 if has_image else 0, image_url, sent_at),
+         1 if has_image else 0, image_url, sent_at, 1 if is_read else 0),
+    )
+
+
+async def set_message_is_read(avito_message_id: str, is_read: bool) -> None:
+    """Keeps the durable flag in step when Avito flips it after the fact.
+
+    _process_chat skips append_message for anything already in known_ids,
+    so without this a message persisted as unread would stay unread in the
+    DB forever — and the next restart would hydrate it as unread and
+    re-notify. Callers must only invoke this on an actual mismatch: every
+    call takes the write lock and commits, and the poller sees up to 50
+    already-known messages per chat per cycle."""
+    await _execute(
+        "UPDATE messages SET is_read = ? WHERE avito_message_id = ?",
+        (1 if is_read else 0, avito_message_id),
     )
 
 
@@ -1086,13 +1104,23 @@ async def set_message_image_url(avito_message_id: str, image_url: str) -> None:
     )
 
 
-async def get_known_message_ids(chat_id: str) -> set[str]:
-    """Durable dedup set — survives process restarts, unlike bot_cache."""
+async def get_known_message_read_flags(chat_id: str) -> dict[str, bool]:
+    """Durable dedup set, with each message's stored is_read alongside it.
+
+    The poller needs both in the same pass and they come from the same row,
+    so they're fetched together rather than in two queries: the keys are
+    the dedup set, and the values let the caller skip a write when Avito's
+    flag still matches what we already stored."""
     rows = await _fetchall(
-        "SELECT avito_message_id FROM messages WHERE chat_id = ? AND avito_message_id IS NOT NULL",
+        "SELECT avito_message_id, is_read FROM messages WHERE chat_id = ? AND avito_message_id IS NOT NULL",
         (chat_id,),
     )
-    return {r["avito_message_id"] for r in rows}
+    return {r["avito_message_id"]: bool(r["is_read"]) for r in rows}
+
+
+async def get_known_message_ids(chat_id: str) -> set[str]:
+    """Durable dedup set — survives process restarts, unlike bot_cache."""
+    return set(await get_known_message_read_flags(chat_id))
 
 
 async def get_point_id_for_chat(chat_id: str) -> int | None:

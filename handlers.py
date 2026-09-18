@@ -538,6 +538,15 @@ async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
     for m in messages:
         if m.message_id is not None:
             await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read, image_url=m.image_url)
+            if m.image_url:
+                # Persist the attachment URL, not just cache it. The poller
+                # used to be the one backfilling these, but it only did so
+                # as a side effect of re-fetching every fully-read chat on
+                # every cycle — the very cost this round removed. Doing it
+                # here keeps the capability at no cost to the poll loop:
+                # chat opens are human-paced, and the UPDATE only ever
+                # fills a blank (see set_message_image_url).
+                await database.set_message_image_url(m.message_id, m.image_url)
 
 
 @crm_router.callback_query(F.data.startswith((f"{constants.PREFIX_CHAT}_", f"{constants.PREFIX_REPLY}_")))
@@ -1422,6 +1431,23 @@ async def cb_point_action(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_reply_markup(
             reply_markup=keyboards.point_multiselect_kb(all_points, current, "sub", key)
         )
+    elif mode == "ordpoint":
+        # key carries both the ad id and the account, joined with "|": ":"
+        # is already the delimiter cb_point_action splits on.
+        item_id, account_id_str = key.split("|")
+        await database.reassign_item_point(item_id, point_id, callback.from_user.id)
+        point = await database.get_point(point_id)
+        await callback.message.answer(
+            f"✅ Объявление привязано к точке: {html.escape(point.name) if point else point_id}.\n"
+            "Заказы и чаты по этому объявлению теперь будут попадать туда автоматически."
+        )
+        # Back to the list rather than the card: the point is what moved,
+        # and the list is where that is visible — the order leaves
+        # «📍 Без точки» for its own point. account_id_str is unused here
+        # for that reason, but stays in the key so the payload shape
+        # matches every other order callback.
+        del account_id_str
+        await _show_all_orders(callback.message, callback.from_user.id, fresh=True)
     elif mode == "acpoint":
         account_id = int(key)
         await database.set_avito_account_point(account_id, point_id)
@@ -2409,8 +2435,9 @@ async def show_orders_menu(message: Message) -> None:
 
 UNASSIGNED_HINT = (
     "Эти заказы пришли без переписки с покупателем, привязать их не к чему. "
-    "Задайте точку по умолчанию для кабинета в «⚙️ Настройки → 🔑 Avito API», "
-    "и следующие такие заказы встанут на место сами."
+    "Откройте заказ и нажмите «📍 Привязать к точке» — это запомнится навсегда, "
+    "и будущие заказы и чаты по тому же объявлению привяжутся сами. "
+    "Либо задайте точку по умолчанию для кабинета в «⚙️ Настройки → 🔑 Avito API»."
 )
 
 
@@ -2570,7 +2597,29 @@ async def _show_order_detail(message: Message, order_id: str, account_id: int, *
     if order_chat_id:
         chat_short_id = await bot_cache.get_short_id(order_chat_id)
 
-    kb = keyboards.order_detail_kb(order, account_id, chat_short_id)
+    # Offer a manual attachment only when nothing resolved the point. There
+    # is no endpoint for an ad's coordinates (avito_client has no
+    # get_item_info), so an order placed without a single chat message
+    # cannot be routed automatically — a human has to say it once.
+    attach_item_id = None
+    if point is None:
+        attach_item_id = ((order.get("items") or [{}])[0]).get("avitoId")
+        if attach_item_id:
+            lines.append(
+                "\n📍 Точка не определена. Привяжите объявление к точке — "
+                "это запомнится и для будущих заказов, и для чатов по нему."
+            )
+        else:
+            lines.append(
+                "\n📍 Точка не определена. У этого заказа нет номера объявления, "
+                "привязать его можно только точкой по умолчанию у кабинета "
+                "(«⚙️ Настройки → 🔑 Avito API»)."
+            )
+        detail_text = "\n".join(lines)
+
+    kb = keyboards.order_detail_kb(
+        order, account_id, chat_short_id, attach_item_id=str(attach_item_id) if attach_item_id else None
+    )
 
     barcode_png = None
     if track_number:
@@ -2627,6 +2676,29 @@ async def cb_order_refresh_one(callback: CallbackQuery) -> None:
     _, payload = callback.data.split("_", 1)
     order_id, account_id_str = payload.split(":")
     await _show_order_detail(callback.message, order_id, int(account_id_str), fresh=True)
+
+
+@crm_router.callback_query(F.data.startswith(f"{constants.PREFIX_ORDPOINT}_"))
+async def cb_order_attach_point(callback: CallbackQuery) -> None:
+    """Offers the point list for an order whose point could not be resolved.
+
+    The choice is stored against the AD (avito_items), not the order, so a
+    single attachment routes every future order for that ad and every chat
+    about it — they read the same table."""
+    await callback.answer()
+    _, payload = callback.data.split("_", 1)
+    item_id, account_id_str = payload.split(":")
+    points = await database.list_points()
+    if not points:
+        await callback.message.answer("⚠️ Нет активных точек.")
+        return
+    await callback.message.answer(
+        "📍 К какой точке относится это объявление?\n"
+        "Выбор запомнится: будущие заказы и чаты по нему привяжутся сами.",
+        reply_markup=keyboards.point_multiselect_kb(
+            points, set(), "ordpoint", f"{item_id}|{account_id_str}"
+        ),
+    )
 
 
 @crm_router.callback_query(F.data.startswith("ordact_"))

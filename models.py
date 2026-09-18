@@ -264,6 +264,10 @@ class Message:
     # Trails the required fields (and defaults) so _row() still builds a
     # Message from any row predating migration 010.
     image_url: str | None = None
+    # Avito's own read flag, persisted since migration 015. Rows written
+    # before it read back as 1 ("read") by the column default — see the
+    # migration for why that direction is the safe one.
+    is_read: int = 1
 
     @classmethod
     def from_row(cls, row: Mapping[str, Any]) -> "Message":

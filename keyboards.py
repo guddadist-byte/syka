@@ -487,7 +487,8 @@ def orders_menu_kb(
     return builder.as_markup()
 
 
-def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = None) -> InlineKeyboardMarkup:
+def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = None,
+                     *, attach_item_id: str | None = None) -> InlineKeyboardMarkup:
     """Action buttons for a single order — built from what Avito actually
     says is possible (`availableActions`), not hardcoded per delivery type
     (the pvz/dbs/rdbs/courier/cnc/postamat action table in Avito's docs
@@ -496,6 +497,12 @@ def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = No
     checkConfirmationCode isn't in availableActions at all (per Avito's
     docs it isn't order-scoped the same way) — shown for pvz orders
     specifically, since it's documented as pvz-only.
+
+    attach_item_id is the ad's avitoId, passed only when this order's point
+    could not be resolved. It offers a one-off manual attachment; because
+    that writes avito_items, it fixes every future order AND chat for that
+    ad, not just this one order. Orders with no avitoId get no button — the
+    caller says so in words instead of pretending we can do more than we can.
     """
     builder = InlineKeyboardBuilder()
     order_id = order.get("id")
@@ -520,6 +527,13 @@ def order_detail_kb(order: dict, account_id: int, chat_short_id: str | None = No
     if row:
         builder.row(*row)
 
+    if attach_item_id:
+        builder.row(
+            InlineKeyboardButton(
+                text="📍 Привязать к точке",
+                callback_data=f"{constants.PREFIX_ORDPOINT}_{attach_item_id}:{account_id}",
+            )
+        )
     if (order.get("delivery") or {}).get("serviceType") == "pvz":
         builder.row(InlineKeyboardButton(text="✅ Код получения", callback_data=f"ordcode_{order_id}:{account_id}"))
     if chat_short_id:

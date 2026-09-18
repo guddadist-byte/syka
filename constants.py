@@ -124,6 +124,7 @@ PREFIX_ADM = "adm"
 PREFIX_DELMSG = "delmsg"
 PREFIX_REASSIGN = "reassign"
 PREFIX_ORDUNASSIGNED = "ordunassigned"
+PREFIX_ORDPOINT = "ordpoint"
 PREFIX_ORDREFRESH = "ordrefresh"
 PREFIX_ORDREFRESHONE = "ordrefone"
 PREFIX_NOTES = "notes"
@@ -149,11 +150,32 @@ FULL_SYNC_EVERY_N_POLLS = 20
 # Avito's own OpenAPI spec caps the offset parameter at 1000, so 10 pages
 # (offset up to 900) is the real usable ceiling, not an arbitrary guess.
 CHAT_POLL_MAX_PAGES = 10
+# How long a chat we still count as unread may go without a live
+# get_messages() re-check.
+#
+# A chat with an unanswered client message can be read by a human directly
+# in Avito's own app, without a new message ever arriving — re-fetching is
+# the only way we ever see that flip. But re-fetching it on EVERY cycle is
+# what made notifications minutes late: the normal cycle asks Avito only
+# for unread chats, so every one of them failed the short-circuit and cost
+# one throttled request (1 req/sec per account), making a cycle
+# 1 + <unread chats> seconds long before its 15s sleep even started. With
+# 100 unread chats that is a ~2 minute cycle, and a brand-new message waits
+# a full cycle plus its place in the queue.
+#
+# 120s keeps the "read in Avito directly" reconciliation well inside the
+# couple of minutes anyone would notice, while cutting the dominant cost by
+# 8x at POLL_INTERVAL_SECONDS=15.
+UNREAD_RECHECK_SECONDS = 120
 ACCOUNT_RELOAD_INTERVAL_SECONDS = 300
 MESSAGE_PRUNE_INTERVAL_SECONDS = 3600
 MESSAGE_RETENTION_DAYS = 30
 BACKUP_LOOP_INTERVAL_SECONDS = 3600
-ORDER_POLL_INTERVAL_SECONDS = 120
+# Orders share one 1 req/sec budget per account with the chat poller, and a
+# pass costs several paginated requests. Orders have no second-level
+# urgency; a client's message does — so orders poll rarely enough to stay
+# out of the way.
+ORDER_POLL_INTERVAL_SECONDS = 300
 # How often to look for scheduled replies that have come due. 30s keeps the
 # worst-case lateness under half a minute, which is well inside what anyone
 # means by "send this at 18:00".
@@ -175,6 +197,10 @@ ERROR_BACKOFF_MAX_SECONDS = 600
 
 AVITO_MIN_REQUEST_INTERVAL_SECONDS = 1.0
 AVITO_MAX_RETRIES = 3
+# Hard ceiling on a single Avito HTTP attempt. aiohttp's default is 5
+# minutes, which with AVITO_MAX_RETRIES meant one request could hold an
+# account's serial poll loop for ~15 minutes.
+AVITO_REQUEST_TIMEOUT_SECONDS = 30
 
 COORD_MAX_DISTANCE_M = 25.0
 POINT_CONFLICT_WARNING_M = 150.0

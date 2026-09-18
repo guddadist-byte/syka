@@ -381,6 +381,15 @@ async def _refresh_chat_from_avito(chat: bot_cache.CachedChat) -> None:
     for m in messages:
         if m.message_id is not None:
             await bot_cache.sync_is_read(chat.chat_id, m.message_id, m.is_read, image_url=m.image_url)
+            if m.image_url:
+                # Persist the attachment URL, not just cache it. The poller
+                # used to be the one backfilling these, but it only did so
+                # as a side effect of re-fetching every fully-read chat on
+                # every cycle — the very cost this round removed. Doing it
+                # here keeps the capability at no cost to the poll loop:
+                # chat opens are human-paced, and the UPDATE only ever
+                # fills a blank (see set_message_image_url).
+                await database.set_message_image_url(m.message_id, m.image_url)
 
 
 async def api_chat_detail(request: web.Request) -> web.Response:
@@ -863,6 +872,11 @@ async def api_order_detail(request: web.Request) -> web.Response:
         "delivery_type": delivery_info.get("serviceType"),
         "available_actions": [a.get("name") for a in (order.get("availableActions") or [])],
         "chat_short_id": chat_short_id,
+        # Only when nothing routed this order: there is no endpoint for an
+        # ad's coordinates, so an order placed without a single chat message
+        # has to be attached by hand — once per ad, not once per order.
+        "attach_item_id": (str(items[0].get("avitoId")) if point is None and items
+                            and items[0].get("avitoId") else None),
         "has_barcode": bool(track_number),
     })
 
@@ -896,6 +910,45 @@ async def api_order_barcode(request: web.Request) -> web.Response:
         return web.Response(status=404)
     png_bytes = utils.generate_barcode_png(str(track_number))
     return web.Response(body=png_bytes, content_type="image/png")
+
+
+async def api_order_set_point(request: web.Request) -> web.Response:
+    """Attaches the order's ad to a point, by hand, once.
+
+    Stored against the ad (avito_items), not the order, so it also routes
+    every future order and every chat for that ad — one table, one effect.
+    """
+    account_id = int(request.match_info["account_id"])
+    order_id = request.match_info["order_id"]
+    user = request["user"]
+
+    body = await request.json()
+    try:
+        point_id = int(body.get("point_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "bad_point_id"}, status=400)
+    if await database.get_point(point_id) is None:
+        return web.json_response({"error": "unknown_point"}, status=404)
+
+    client = avito_client.get_pool().get(account_id)
+    if client is None:
+        return web.json_response({"error": "avito_unavailable"}, status=503)
+    try:
+        order = await client.find_order(order_id)
+    except avito_client.AvitoAPIError as exc:
+        return web.json_response({"error": "avito_rejected", "detail": str(exc)}, status=502)
+    if order is None:
+        return web.json_response({"error": "not_found"}, status=404)
+
+    items = order.get("items") or []
+    item_id = str(items[0].get("avitoId")) if items and items[0].get("avitoId") else None
+    if not item_id:
+        # No ad id means there is nothing sticky to attach to; the only
+        # lever left is the cabinet's default point.
+        return web.json_response({"error": "no_item_id"}, status=400)
+
+    await database.reassign_item_point(item_id, point_id, user.telegram_id)
+    return web.json_response({"ok": True, "point_id": point_id})
 
 
 async def api_order_action(request: web.Request) -> web.Response:
@@ -1768,6 +1821,7 @@ def create_app(bot_token: str, bot=None, db_path: str | None = None) -> web.Appl
     app.router.add_get("/api/orders/{account_id}/{order_id}", api_order_detail)
     app.router.add_get("/api/orders/{account_id}/{order_id}/barcode.png", api_order_barcode)
     app.router.add_post("/api/orders/{account_id}/{order_id}/action", api_order_action)
+    app.router.add_post("/api/orders/{account_id}/{order_id}/point", api_order_set_point)
 
     app.router.add_get("/api/admin/users", api_admin_users)
     app.router.add_patch("/api/admin/users/{user_id}", api_admin_user_update)

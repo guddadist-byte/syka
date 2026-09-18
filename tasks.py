@@ -92,6 +92,11 @@ async def _build_initial_messages(chat_id: str) -> list[bot_cache.CachedMessage]
                 has_image=bool(m.has_image),
                 image_url=m.image_url,
                 created_at=utils.parse_utc(m.sent_at),
+                # Persisted since migration 015. Before it, this fell back
+                # to CachedMessage's is_read=True default, which is what
+                # made every chat look "already read" after a restart and
+                # forced upsert_chat to leave last_message_at unset.
+                is_read=bool(m.is_read),
             )
         )
     return messages
@@ -158,23 +163,43 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     if (
         cached.last_message_at is not None and incoming_last is not None
         and incoming_last <= cached.last_message_at
-        and cached.unread_count == 0
     ):
-        # Nothing new AND nothing outstanding to double-check — safe to
-        # skip the get_messages() round trip entirely. A chat we still
-        # count as unread bypasses this even with an unchanged timestamp:
+        # Nothing new since the last message we already hold.
+        if cached.unread_count == 0:
+            # And nothing outstanding to double-check — skip the
+            # get_messages() round trip entirely.
+            return
+        # We still count this chat as unread, so it's worth re-confirming:
         # a human can read an old message directly in Avito's own app
-        # without ever sending a new one, which is real_unread_count's
-        # whole reason for existing (see bot_cache) — without re-fetching
-        # here, that flip would never be observed.
-        return
+        # without ever sending a new one, and re-fetching is the only way
+        # that flip is ever observed (real_unread_count's whole reason for
+        # existing, see bot_cache).
+        #
+        # But that re-check used to happen on EVERY cycle, and a normal
+        # cycle asks Avito precisely for the unread chats — so every chat
+        # in the list failed this test and spent one throttled request,
+        # every 15 seconds, for as long as it stayed unanswered. That made
+        # the cycle grow with the unread backlog and is the mechanism
+        # behind "messages started arriving late". Pace it instead: still
+        # re-checked, just not eight times a minute.
+        if (
+            cached.last_polled_at is not None
+            and (datetime.utcnow() - cached.last_polled_at).total_seconds()
+            < constants.UNREAD_RECHECK_SECONDS
+        ):
+            return
 
     try:
         messages = await client.get_messages(chat.chat_id)
-    except avito_client.AvitoAPIError:
+    except (avito_client.AvitoAPIError, asyncio.TimeoutError):
+        # TimeoutError is not an AvitoAPIError and not an aiohttp
+        # ClientError either, so without naming it here one stuck request
+        # aborts the whole account's cycle into the 30..600s error backoff
+        # — total silence for every other chat on that account.
         return
+    await bot_cache.mark_polled(chat.chat_id)
 
-    known_ids = await database.get_known_message_ids(chat.chat_id)
+    known_flags = await database.get_known_message_read_flags(chat.chat_id)
 
     # Collected instead of notifying inside the loop: after a restart (or
     # any gap in polling), several client messages can show up as "new" in
@@ -195,11 +220,20 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         )
         is_new = await bot_cache.add_message(chat.chat_id, cached_message)
 
-        if message.message_id is not None and message.message_id in known_ids:
+        if message.message_id is not None and message.message_id in known_flags:
             if message.image_url:
                 # Backfill only — messages persisted before the image_url
                 # column existed never pass the append_message() below.
                 await database.set_message_image_url(message.message_id, message.image_url)
+            if known_flags[message.message_id] != message.is_read:
+                # Same idea for is_read: this message will never be
+                # re-inserted, so if Avito has flipped its flag since, only
+                # this write keeps the durable row honest — and the durable
+                # row is what the next restart hydrates from. Guarded by the
+                # comparison because an unguarded UPDATE here would commit
+                # once per already-known message per cycle, on the single
+                # shared connection the whole process writes through.
+                await database.set_message_is_read(message.message_id, message.is_read)
             # Already persisted before a restart — bot_cache is in-memory
             # and resets on every restart, so without this DB-backed check
             # every message in Avito's recent history would look "new"
@@ -216,7 +250,7 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         await database.append_message(
             chat.chat_id, message.direction, message.text, message.has_image,
             sent_at=sent_at_str, avito_message_id=message.message_id,
-            image_url=message.image_url,
+            image_url=message.image_url, is_read=message.is_read,
         )
 
         if message.direction != "in":

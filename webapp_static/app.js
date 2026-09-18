@@ -980,9 +980,29 @@ async function renderOrderDetail(params) {
         ${actionBtn("setCNCDetails", `${ICONS.pin} Подготовить самовывоз`, "secondary")}
         ${order.delivery_type === "pvz" ? '<button class="btn secondary small" data-action="checkConfirmationCode">${ICONS.check} Код получения</button>' : ""}
         ${order.chat_short_id ? `<button class="btn secondary small" id="orderChatBtn">${ICONS.chat} Чат с покупателем</button>` : ""}
+        ${order.attach_item_id ? `<button class="btn secondary small" id="orderAttachBtn">${ICONS.pin} Привязать к точке</button>` : ""}
       </div>
+      ${!order.point_name ? `<div class="preview">${order.attach_item_id
+          ? "Точка не определена. Привяжите объявление к точке — это запомнится и для будущих заказов, и для чатов по нему."
+          : "Точка не определена. У этого заказа нет номера объявления — привязать можно только точкой по умолчанию у кабинета."
+        }</div>` : ""}
+      <div id="orderAttachBox"></div>
       <div id="orderActionForm"></div>
     `;
+
+    if (order.attach_item_id) {
+      document.getElementById("orderAttachBtn").addEventListener("click", async () => {
+        const box = document.getElementById("orderAttachBox");
+        try {
+          const points = await apiGet("/points");
+          const pid = await pickPointInline(points, box);
+          if (pid == null) return;
+          await apiPost(`/orders/${params.accountId}/${encodeURIComponent(params.orderId)}/point`, { point_id: pid });
+          toast("Объявление привязано к точке");
+          renderOrderDetail(params);
+        } catch (err) { toast("Ошибка: " + err.message); }
+      });
+    }
 
     if (order.chat_short_id) {
       document.getElementById("orderChatBtn").addEventListener("click", () => go("chatDetail", { shortId: order.chat_short_id }));

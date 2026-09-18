@@ -25,6 +25,7 @@ import ai_handlers
 import avito_client
 import bot_cache
 import config
+import constants
 import database
 import handlers
 import keyboards
@@ -70,7 +71,14 @@ async def main() -> None:
         # instead of vanishing. Anything registered after it would be dead.
         dp.include_router(handlers.fallback_router)
 
-        avito_session = aiohttp.ClientSession()
+        # An explicit timeout, because aiohttp's default is total=5min per
+        # attempt and _request retries up to AVITO_MAX_RETRIES times — one
+        # unlucky request could hold an account's strictly serial poll loop
+        # for a quarter of an hour, with every other chat on that account
+        # silent behind it.
+        avito_session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=constants.AVITO_REQUEST_TIMEOUT_SECONDS)
+        )
         web_runner: web.AppRunner | None = None
         try:
             await avito_client.init_pool(avito_session)
