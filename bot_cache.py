@@ -115,7 +115,8 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                        client_name: str, item_id: str | None = None,
                        item_title: str | None = None, item_url: str | None = None,
                        initial_messages: list[CachedMessage] | None = None,
-                       read_at: datetime | None = None) -> CachedChat:
+                       read_at: datetime | None = None,
+                       summary_last_message_at: datetime | None = None) -> CachedChat:
     async with _lock:
         chat = _chats.get(chat_id)
         if chat is None:
@@ -156,6 +157,21 @@ async def upsert_chat(chat_id: str, *, point_id: int | None, avito_account_id: i
                 # never be restored without honest is_read, or the
                 # "Непрочитанные is always empty" regression comes back.
                 chat.last_message_at = chat.messages[-1].created_at
+            elif summary_last_message_at is not None:
+                # No message history, but the chats table still records when
+                # this chat last had one — and that column outlives the
+                # messages themselves, which _prune_messages_loop deletes
+                # after MESSAGE_RETENTION_DAYS while leaving the chat row.
+                #
+                # Without this, every chat older than the retention window
+                # hydrates with last_message_at=None, fails the first
+                # conjunct of _process_chat's short-circuit and pays a
+                # throttled get_messages EVERY time it appears in the poll
+                # list — on a full sync, that is every chat at once. The set
+                # only grows with age, which is why the delay came back
+                # after the bot had been running for a while rather than
+                # right after a restart.
+                chat.last_message_at = summary_last_message_at
             _chats[chat_id] = chat
             _short_index[short_id] = chat_id
         else:

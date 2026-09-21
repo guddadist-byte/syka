@@ -11,6 +11,7 @@ import asyncio
 import html
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 
 from aiogram import Bot
@@ -62,8 +63,20 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
                     break
                 offset += 100
 
+            started = time.monotonic()
             for chat in chats:
                 await _process_chat(chat, account, bot, client)
+            elapsed = time.monotonic() - started
+
+            # The only line that says how long a cycle actually took. Three
+            # rounds of "notifications are late" were diagnosed by reasoning
+            # about the code because the poller logged nothing at all on a
+            # healthy run — a cycle that quietly grew to minutes looked
+            # exactly like one that took a second.
+            logger.info(
+                "poll cycle done: account=%s chats=%d %.1fs%s",
+                account.name, len(chats), elapsed, " (full sync)" if is_full_sync else "",
+            )
 
             await database.set_avito_account_error(account.id, None)
             backoff = constants.ERROR_BACKOFF_BASE_SECONDS
@@ -119,6 +132,9 @@ async def hydrate_cache_from_db() -> None:
             chat.chat_id, point_id=chat.point_id, avito_account_id=chat.avito_account_id,
             client_name=chat.client_name or "", item_id=chat.item_id,
             initial_messages=initial_messages, read_at=read_at,
+            summary_last_message_at=(
+                utils.parse_utc(chat.last_message_at) if chat.last_message_at else None
+            ),
         )
 
 
@@ -141,24 +157,22 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     was_cached = await bot_cache.get_chat(chat.chat_id) is not None
     initial_messages: list[bot_cache.CachedMessage] = []
     read_at = None
+    summary_last_at = None
     if not was_cached:
         initial_messages = await _build_initial_messages(chat.chat_id)
         summary = await database.get_chat_summary(chat.chat_id)
         if summary is not None and summary.read_at:
             read_at = utils.parse_utc(summary.read_at)
+        if summary is not None and summary.last_message_at:
+            summary_last_at = utils.parse_utc(summary.last_message_at)
 
     cached = await bot_cache.upsert_chat(
         chat.chat_id, point_id=point_id, avito_account_id=account.id,
         client_name=chat.client_name, item_id=chat.item_id,
         item_title=chat.item_title, item_url=chat.item_url,
         initial_messages=initial_messages, read_at=read_at,
+        summary_last_message_at=summary_last_at,
     )
-    await database.set_chat_unread_count(chat.chat_id, cached.unread_count)
-    await database.upsert_chat_summary(
-        chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
-        client_name=chat.client_name, item_url=chat.item_url,
-    )
-
     incoming_last = utils.parse_utc(chat.last_message_at) if chat.last_message_at else None
     if (
         cached.last_message_at is not None and incoming_last is not None
@@ -188,6 +202,19 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             < constants.UNREAD_RECHECK_SECONDS
         ):
             return
+
+    # Deliberately below the short-circuit, not above it. These two writes
+    # used to run for EVERY chat in the list, including the ones that
+    # returned two lines later with nothing changed — two commits each, and
+    # SQLite here runs at the default synchronous=FULL, so each one is an
+    # fsync, on the single connection the whole process shares. Past the
+    # short-circuit we know something actually differs, so the write earns
+    # its cost.
+    await database.set_chat_unread_count(chat.chat_id, cached.unread_count)
+    await database.upsert_chat_summary(
+        chat.chat_id, avito_account_id=account.id, point_id=point_id, item_id=chat.item_id,
+        client_name=chat.client_name, item_url=chat.item_url,
+    )
 
     try:
         messages = await client.get_messages(chat.chat_id)
@@ -277,7 +304,20 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
         new_in_messages.append(cached_message)
 
     if new_in_messages:
-        await _notify_subscribers(chat.chat_id, point_id, cached, new_in_messages, bot)
+        # Fire it off rather than awaiting it here. This runs inside
+        # poll_account_loop's `for chat in chats` walk, so awaiting meant
+        # every Telegram round trip — now through a SOCKS5 proxy, with
+        # aiogram's 60s default timeout and no retry middleware — held up
+        # the NEXT chat's get_messages. The Avito budget sat idle while the
+        # loop waited on Telegram. Notifying is not something the poll
+        # cycle needs the result of.
+        task = asyncio.create_task(
+            _notify_subscribers(chat.chat_id, point_id, cached, new_in_messages, bot)
+        )
+        # Keep a reference: asyncio only holds a weak one, so without this
+        # a notification can be garbage-collected mid-flight.
+        _notify_tasks.add(task)
+        task.add_done_callback(_notify_tasks.discard)
 
     # unread_count may have changed during the loop above — a new inbound
     # message, or an "out" reply sent directly in Avito's own app rather
@@ -285,6 +325,11 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     final_chat = await bot_cache.get_chat(chat.chat_id)
     if final_chat is not None:
         await database.set_chat_unread_count(chat.chat_id, final_chat.unread_count)
+
+
+# In-flight notification tasks. asyncio keeps only a weak reference to a
+# task, so one that nothing holds can be collected before it finishes.
+_notify_tasks: set[asyncio.Task] = set()
 
 
 async def _send_notification(bot: Bot, telegram_id: int, text: str, short_id: str) -> None:
@@ -338,8 +383,11 @@ async def _notify_subscribers(chat_id: str, point_id: int | None, cached_chat: b
         return
 
     recipients = {u.telegram_id: u for u in await database.list_point_subscribers(point_id, on_shift_only=True)}
-    for user_id in recipients:
-        await _send_notification(bot, user_id, text, short_id)
+    # Concurrently, not one after another: a point with five people on shift
+    # used to cost five sequential Telegram round trips, and since Telegram
+    # moved behind a SOCKS5 proxy each of those is far from free.
+    # _send_notification swallows its own errors, so gather cannot raise.
+    await asyncio.gather(*(_send_notification(bot, uid, text, short_id) for uid in recipients))
 
 
 async def _reload_accounts_loop() -> None:
@@ -662,7 +710,24 @@ async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     return tasks
 
 
+async def drain_notifications(timeout: float = 10.0) -> None:
+    """Waits for notifications already in flight.
+
+    Notifying is dispatched as a task so Telegram's latency stays off the
+    poll loop's critical path (see _process_chat). The flip side is that
+    nothing otherwise owns those tasks: on shutdown the loop would close
+    underneath them and a notification the client is waiting on would be
+    destroyed mid-send. Also used by tests, which need the same guarantee
+    before asserting that something was delivered."""
+    pending = list(_notify_tasks)
+    if not pending:
+        return
+    await asyncio.wait(pending, timeout=timeout)
+
+
 async def stop_all(tasks: list[asyncio.Task]) -> None:
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    # After the pollers stop, before the loop goes away.
+    await drain_notifications()

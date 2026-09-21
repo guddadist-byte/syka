@@ -157,7 +157,13 @@ POLL_INTERVAL_SECONDS = 15
 # not persist is_read and nothing could short-circuit. Since migration 015
 # it does, so the overwhelming majority of chats on a full pass take the
 # short exit and cost nothing.
-FULL_SYNC_EVERY_N_POLLS = 8
+# Вернулось к 20 с 8. Понижая, я исходил из того, что после миграции 015
+# полная сверка стала дешёвой — но для чатов, у которых история уже вычищена
+# по MESSAGE_RETENTION_DAYS, это было неверно: они не проходили короткий
+# выход и стоили по запросу каждый раз. Корень починен отдельно (кэш берёт
+# last_message_at из сводки), а здесь возвращается запас, пока дешевизна
+# полной сверки не подтверждена замером, а не рассуждением.
+FULL_SYNC_EVERY_N_POLLS = 20
 # Safety ceiling for GET .../chats pagination during polling (100/page).
 # Avito's own OpenAPI spec caps the offset parameter at 1000, so 10 pages
 # (offset up to 900) is the real usable ceiling, not an arbitrary guess.
