@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,8 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 
 import database
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,6 +57,21 @@ def load_static_config() -> StaticConfig:
     )
 
 
+def _mask_proxy_url(proxy_url: str) -> str:
+    """Hides the password so the proxy can be named in the log.
+
+    Log files get tailed, pasted into chats and forwarded; a proxy password
+    must not ride along. Everything else stays readable, because the whole
+    point of the log line is to let someone confirm at a glance that the
+    proxy they just set is the one actually in use."""
+    scheme, sep, rest = proxy_url.partition("://")
+    if not sep or "@" not in rest:
+        return proxy_url
+    creds, _, host = rest.rpartition("@")
+    user, has_pass, _ = creds.partition(":")
+    return f"{scheme}://{user}{':***' if has_pass else ''}@{host}"
+
+
 def _proxy_url_with_auth(proxy_url: str, login: str | None, password: str | None) -> str:
     if not login or "@" in proxy_url:
         return proxy_url
@@ -77,6 +95,13 @@ async def build_bot(static_cfg: StaticConfig) -> Bot:
         # proxy URLs uniformly (socks support requires aiohttp-socks, which
         # is in requirements.txt).
         session = AiohttpSession(proxy=proxy_url)
+        # Without this line a dead proxy and a misconfigured one look
+        # identical from the outside: the process starts fine and simply
+        # never reaches Telegram. Naming the proxy here is what turns that
+        # into a one-glance diagnosis.
+        logger.info("Telegram goes through proxy %s", _mask_proxy_url(proxy_url))
+    else:
+        logger.info("Telegram connects directly (no proxy configured)")
 
     return Bot(
         token=static_cfg.bot_token,
