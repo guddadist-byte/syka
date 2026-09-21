@@ -112,6 +112,20 @@ async def main() -> None:
             # the Avito pool, the web server and every poller are up, so the
             # report describes a bot that is genuinely working.
             await tasks.send_startup_report(bot, webapp_enabled=bool(static_cfg.webapp_url))
+            # Say plainly whether Telegram is reachable at all. Without
+            # this, a revoked token, a dead proxy and a blocked route are
+            # indistinguishable: aiogram catches every getUpdates failure
+            # and retries every 1-5 seconds forever, so the bot is silent
+            # either way and the log never names the reason. Reporting
+            # only — polling starts regardless, exactly as before, and the
+            # web server is already up so even a slow failure here (60s is
+            # aiogram's per-request timeout) cannot hold up the Mini App.
+            try:
+                me = await bot.get_me()
+                logger.info("Telegram reachable as @%s (id=%s)", me.username, me.id)
+            except Exception as exc:
+                logger.error("cannot reach Telegram: %s: %s", type(exc).__name__, exc)
+
             try:
                 # The line that separates "came up" from "crash-looping":
                 # on a healthy start the log was otherwise almost empty,
