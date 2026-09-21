@@ -324,6 +324,16 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
     # than through this bot — persist the final, self-corrected value.
     final_chat = await bot_cache.get_chat(chat.chat_id)
     if final_chat is not None:
+        if final_chat.last_message_at is None and incoming_last is not None:
+            # We just fetched and Avito gave us nothing add_message would
+            # take — an empty chat, or one whose history Avito itself no
+            # longer serves. Without this the chat keeps last_message_at
+            # None, fails the short-circuit's first conjunct and buys a
+            # throttled request on EVERY cycle, forever. Avito's own
+            # last_message_at from the chat list is the authoritative
+            # answer to "what is the newest thing here", and we have just
+            # confirmed we are current as of it.
+            await bot_cache.set_last_message_at(chat.chat_id, incoming_last)
         await database.set_chat_unread_count(chat.chat_id, final_chat.unread_count)
 
 

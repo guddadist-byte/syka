@@ -200,6 +200,19 @@ async def mark_polled(chat_id: str, at: datetime | None = None) -> None:
             chat.last_polled_at = at or datetime.utcnow()
 
 
+async def set_last_message_at(chat_id: str, value: datetime) -> None:
+    """Records how current our knowledge of a chat is, when the messages
+    themselves cannot say so.
+
+    Normally add_message sets this. A chat Avito returns no messages for
+    never reaches add_message, so without this it stays None and every
+    poll cycle re-fetches it forever. Only ever moves forward."""
+    async with _lock:
+        chat = _chats.get(chat_id)
+        if chat is not None:
+            chat.last_message_at = max(chat.last_message_at or value, value)
+
+
 async def get_chat(chat_id: str) -> CachedChat | None:
     async with _lock:
         return _chats.get(chat_id)
