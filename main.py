@@ -85,9 +85,21 @@ async def main() -> None:
             await avito_client.reload_accounts()
 
             if static_cfg.webapp_url:
-                await bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(text="📱 Приложение", web_app=WebAppInfo(url=static_cfg.webapp_url))
-                )
+                try:
+                    await bot.set_chat_menu_button(
+                        menu_button=MenuButtonWebApp(text="📱 Приложение", web_app=WebAppInfo(url=static_cfg.webapp_url))
+                    )
+                except Exception:
+                    # This is the first live Telegram call of the whole
+                    # startup, and it used to be unguarded — so whenever
+                    # Telegram was unreachable the bot died right here,
+                    # before run_all_polls and before start_polling, and
+                    # systemd restarted it forever. From the outside that
+                    # looks exactly like "the service is running but the
+                    # bot is silent". The Mini App also opens from the
+                    # bot's own main menu, so losing the system menu
+                    # button costs far less than not starting at all.
+                    logger.warning("could not set the Mini App menu button, continuing without it", exc_info=True)
                 web_app = webapp.create_app(static_cfg.bot_token, bot, static_cfg.db_path)
                 web_runner = web.AppRunner(web_app)
                 await web_runner.setup()
@@ -101,6 +113,10 @@ async def main() -> None:
             # report describes a bot that is genuinely working.
             await tasks.send_startup_report(bot, webapp_enabled=bool(static_cfg.webapp_url))
             try:
+                # The line that separates "came up" from "crash-looping":
+                # on a healthy start the log was otherwise almost empty,
+                # so there was nothing to look for.
+                logger.info("polling started — the bot is live")
                 await dp.start_polling(bot)
             finally:
                 # Marks this as a planned stop. A start that finds no such
@@ -125,4 +141,12 @@ if __name__ == "__main__":
     except utils.SingletonLockError as exc:
         logging.basicConfig(level="INFO")
         logger.error(str(exc))
+        raise SystemExit(1)
+    except Exception:
+        # main() has no except of its own, only finally blocks, so without
+        # this any startup failure left a bare traceback on stderr and the
+        # process exited — with Restart=always that is an endless restart
+        # loop wearing the disguise of a running service. Name it instead.
+        logging.basicConfig(level="INFO")
+        logger.exception("bot failed to start")
         raise SystemExit(1)
