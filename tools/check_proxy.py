@@ -3,12 +3,16 @@
 Запуск на сервере:
     cd /opt/avito_bot && venv/bin/python3 tools/check_proxy.py socks5://user:pass@host:port
 
+С флагом --apply прокси вдобавок вписывается в конфиг бота — но только
+если проверка прошла. Негодный прокси в конфиг не попадёт:
+    cd /opt/avito_bot && venv/bin/python3 tools/check_proxy.py --apply socks5://...
+
 Токен берётся из .env рядом с проектом (или из BOT_TOKEN в окружении), так
 что вводить его отдельно не нужно. Проверка идёт по шагам, от «жив ли
 прокси вообще» к «доходит ли он до Telegram» — потому что эти два отказа
 лечатся совершенно по-разному, а в логе бота выглядят одинаково.
 
-Ничего не меняет: только исходящие запросы.
+Без --apply ничего не меняет: только исходящие запросы.
 """
 
 from __future__ import annotations
@@ -41,18 +45,49 @@ def parse_proxy(url: str) -> tuple[str, str, int]:
     return parsed.scheme, parsed.hostname, port
 
 
-def read_bot_token() -> str | None:
-    token = os.environ.get("BOT_TOKEN")
-    if token:
-        return token
+def read_env_value(name: str) -> str | None:
+    """Значение из окружения, иначе из .env рядом с проектом."""
+    value = os.environ.get(name)
+    if value:
+        return value
     env = Path(__file__).resolve().parent.parent / ".env"
     if not env.exists():
         return None
+    prefix = f"{name}="
     for line in env.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line.startswith("BOT_TOKEN="):
+        if line.startswith(prefix):
             return line.split("=", 1)[1].strip().strip('"').strip("'")
     return None
+
+
+def read_bot_token() -> str | None:
+    return read_env_value("BOT_TOKEN")
+
+
+def apply_proxy(url: str) -> str:
+    """Записывает прокси в proxy_config. Вызывается ТОЛЬКО при вердикте
+    «годится» — негодный прокси не должен иметь физической возможности
+    попасть в конфиг, это и есть смысл флага."""
+    import sqlite3
+
+    db_path = read_env_value("DB_PATH")
+    if not db_path:
+        raise RuntimeError("не нашёл DB_PATH ни в окружении, ни в .env")
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE proxy_config SET proxy_url = ?, proxy_login = NULL, "
+            "proxy_password = NULL, is_enabled = 1 WHERE id = 1",
+            (url,),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT is_enabled, proxy_url FROM proxy_config WHERE id = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    return f"{row[0]}, {row[1]}"
 
 
 def make_connector(url: str):
@@ -121,10 +156,12 @@ def verdict(tcp_err, neutral_ok, neutral_msg, tg_ok, tg_msg) -> tuple[bool, str]
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:] if a != "--apply"]
+    do_apply = "--apply" in sys.argv[1:]
+    if not args:
         print(__doc__)
         return 2
-    url = sys.argv[1]
+    url = args[0]
 
     try:
         scheme, host, port = parse_proxy(url)
@@ -162,6 +199,19 @@ async def main() -> int:
 
     ok, text = verdict(tcp_err, neutral_ok, neutral_msg, tg_ok, tg_msg)
     print(f"\n{text}")
+
+    if do_apply:
+        if not ok:
+            print("\nВ конфиг НЕ вписан — негодный прокси бот не получит.")
+        else:
+            try:
+                state = apply_proxy(url)
+            except Exception as exc:
+                print(f"\nПроверка прошла, но записать в конфиг не вышло: {exc}")
+                return 1
+            print(f"\nВписан в конфиг (is_enabled, proxy_url) = ({state})")
+            print("Осталось перезапустить:  sudo systemctl restart avito_bot")
+
     return 0 if ok else 1
 
 
