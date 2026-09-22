@@ -15,6 +15,7 @@ import math
 import os
 import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import IO
 
 import barcode
@@ -159,3 +160,55 @@ def acquire_singleton_lock(path: str) -> IO[str]:
     fh.write(str(os.getpid()))
     fh.flush()
     return fh
+
+
+def read_git_revision(root: str | None = None) -> str | None:
+    """Short SHA of the checkout the process was started from, or None.
+
+    Answers "did my deploy actually take effect?" — a question that cost a
+    round when a git pull landed but the service was never restarted, and
+    nothing in the log named the running version.
+
+    Reads .git directly instead of shelling out to git: no subprocess, no
+    dependency on git being installed, and nothing to go wrong under the
+    unit's ProtectSystem=strict. Returns None rather than raising for every
+    shape it does not understand, because this runs on the startup path and
+    must never be the reason the bot fails to come up.
+    """
+    base = Path(root) if root else Path(__file__).resolve().parent
+    try:
+        git_dir = base / ".git"
+        if git_dir.is_file():
+            # A worktree or submodule: .git is a file pointing elsewhere.
+            pointer = git_dir.read_text(encoding="utf-8").strip()
+            if not pointer.startswith("gitdir:"):
+                return None
+            git_dir = Path(pointer.split(":", 1)[1].strip())
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+    if not head.startswith("ref:"):
+        # Detached HEAD — the SHA is right there.
+        return head[:12] if _looks_like_sha(head) else None
+
+    ref = head.split(":", 1)[1].strip()
+    try:
+        return (git_dir / ref).read_text(encoding="utf-8").strip()[:12]
+    except OSError:
+        pass
+    try:
+        # Not a loose ref — git may have packed it away.
+        for line in (git_dir / "packed-refs").read_text(encoding="utf-8").splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) == 2 and parts[1] == ref:
+                return parts[0][:12]
+    except OSError:
+        pass
+    return None
+
+
+def _looks_like_sha(value: str) -> bool:
+    return len(value) >= 7 and all(c in "0123456789abcdef" for c in value.lower())

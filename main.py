@@ -39,6 +39,11 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     static_cfg = config.load_static_config()
     logging.basicConfig(level=static_cfg.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # First thing said, on purpose: it answers "did my deploy take effect?"
+    # even when the start fails further down. A git pull without a restart
+    # leaves the old modules loaded in memory and changes nothing, and
+    # until now there was no way to tell that from the log.
+    logger.info("running revision %s", utils.read_git_revision() or "unknown")
     keyboards.set_webapp_url(static_cfg.webapp_url)
 
     lock_handle = utils.acquire_singleton_lock(static_cfg.pid_file)
