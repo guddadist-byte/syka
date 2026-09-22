@@ -49,7 +49,15 @@ async def poll_account_loop(account: models.AvitoAccount, bot: Bot) -> None:
             # could lag up to one full-sync interval behind reality — an
             # acceptable, self-correcting bound (a few minutes), not the
             # "forever" staleness this whole area used to have.
-            is_full_sync = cycle % constants.FULL_SYNC_EVERY_N_POLLS == 0
+            # Not on cycle 0. A full sync walks every chat the account has
+            # and, when their timestamps are not yet known, costs a
+            # throttled request each — measured at 12-13 minutes for 1000
+            # chats. Doing that first means the bot is deaf for a quarter
+            # of an hour immediately after every restart, which is exactly
+            # when people are waiting for it. The unread-only cycles that
+            # run instead deliver new messages within seconds; the full
+            # pass still happens, just once the bot is already useful.
+            is_full_sync = cycle > 0 and cycle % constants.FULL_SYNC_EVERY_N_POLLS == 0
             unread_only = not is_full_sync
 
             chats: list[models.AvitoChat] = []
@@ -334,6 +342,15 @@ async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bo
             # answer to "what is the newest thing here", and we have just
             # confirmed we are current as of it.
             await bot_cache.set_last_message_at(chat.chat_id, incoming_last)
+            # Persist it too, not just cache it. The cache is memory only,
+            # so without this every restart hydrates the chat with no
+            # timestamp again and the next full sync re-fetches all of them
+            # — measured on the real account as 705s and 780s for a single
+            # full sync of 1000 chats.
+            await database.upsert_chat_summary(
+                chat.chat_id, avito_account_id=account.id, point_id=point_id,
+                last_message_at=incoming_last.strftime("%Y-%m-%d %H:%M:%S"),
+            )
         await database.set_chat_unread_count(chat.chat_id, final_chat.unread_count)
 
 
