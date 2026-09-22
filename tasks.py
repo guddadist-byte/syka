@@ -708,15 +708,57 @@ async def send_startup_report(bot: Bot, *, webapp_enabled: bool) -> None:
         logger.exception("send_startup_report: failed")
 
 
+def _watch_task(task: asyncio.Task, what: str) -> None:
+    """Complain if a background loop ever finishes.
+
+    Every loop here runs `while True` and is meant to outlive everything
+    but shutdown, so finishing at all is a failure. Nothing retrieved those
+    exceptions before: run_all_polls created the tasks and never looked at
+    them again, and the only place they were ever awaited discards them
+    (asyncio.gather(..., return_exceptions=True) in stop_all). So a dead
+    poller left no trace whatsoever and looked exactly like an account that
+    was simply switched off.
+
+    A callback rather than an await, because by design nobody is waiting:
+    these tasks are supposed to still be running when the process ends."""
+
+    def _done(finished: asyncio.Task) -> None:
+        if finished.cancelled():
+            return  # ordinary shutdown
+        exc = finished.exception()
+        if exc is not None:
+            logger.error("%s stopped with an error", what, exc_info=exc)
+        else:
+            logger.error("%s stopped unexpectedly (it should never finish)", what)
+
+    task.add_done_callback(_done)
+
+
 async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
     accounts = await database.list_avito_accounts(active_only=True)
+    # Names, not just a count: when only some accounts show up in the
+    # "poll cycle done" lines, this is what says whether the rest are
+    # switched off or dead.
+    if accounts:
+        logger.info(
+            "polling %d Avito account(s): %s",
+            len(accounts), ", ".join(a.name for a in accounts),
+        )
+    else:
+        logger.warning("no active Avito accounts — nothing will be polled")
     tasks = [asyncio.create_task(poll_account_loop(account, bot)) for account in accounts]
+    for account, task in zip(accounts, tasks):
+        _watch_task(task, f"poller for {account.name}")
     tasks.append(asyncio.create_task(_reload_accounts_loop()))
     tasks.append(asyncio.create_task(_prune_messages_loop()))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
     tasks.append(asyncio.create_task(_orders_poll_loop(bot)))
     tasks.append(asyncio.create_task(_scheduled_replies_loop(bot)))
     tasks.append(asyncio.create_task(_heartbeat_loop()))
+    for task, what in zip(tasks[len(accounts):],
+                          ("account reload", "message pruning", "backups", "orders poll",
+                           "scheduled replies", "heartbeat")):
+        _watch_task(task, what)
     return tasks
 
 
