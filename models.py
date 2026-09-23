@@ -180,6 +180,21 @@ class BackupConfig:
 
 
 @dataclass
+class ChatCleanupConfig:
+    id: int
+    is_enabled: int
+    retention_days: int
+    last_run_at: str | None
+    last_deleted: int
+    updated_at: str
+    updated_by: int | None
+
+    @classmethod
+    def from_row(cls, row: Mapping[str, Any]) -> "ChatCleanupConfig":
+        return _row(cls, row)
+
+
+@dataclass
 class StartupNotifyConfig:
     id: int
     is_enabled: int

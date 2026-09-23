@@ -961,6 +961,32 @@ async def mark_backup_done(at: datetime) -> None:
     )
 
 
+# --- chat cleanup config ---------------------------------------------------
+
+
+async def get_chat_cleanup_config() -> models.ChatCleanupConfig:
+    row = await _fetchone("SELECT * FROM chat_cleanup_config WHERE id = 1")
+    assert row is not None
+    return models.ChatCleanupConfig.from_row(row)
+
+
+async def update_chat_cleanup_config(actor_id: int | None = None, **fields: Any) -> None:
+    if not fields:
+        return
+    fields["updated_at"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    if actor_id is not None:
+        fields["updated_by"] = actor_id
+    columns = ", ".join(f"{k} = ?" for k in fields)
+    await _execute(f"UPDATE chat_cleanup_config SET {columns} WHERE id = 1", tuple(fields.values()))
+
+
+async def mark_chat_cleanup_done(deleted: int, at: datetime) -> None:
+    await _execute(
+        "UPDATE chat_cleanup_config SET last_run_at = ?, last_deleted = ? WHERE id = 1",
+        (at.strftime("%Y-%m-%d %H:%M:%S"), deleted),
+    )
+
+
 # --- chats / messages ------------------------------------------------------
 
 
@@ -970,7 +996,53 @@ async def get_chat_summary(chat_id: str) -> models.ChatSummary | None:
 
 
 async def list_all_chats() -> list[models.ChatSummary]:
+    """Все чаты без ограничений.
+
+    Гидрация при старте этим намеренно больше НЕ пользуется — см.
+    list_chats_for_hydration ниже. Возвращать сюда безграничный SELECT значит
+    вернуть и ~14 000 последовательных запросов перед первым ответом бота.
+    Функция оставлена как честный «дай всё» для разовых сверок и тестов.
+    """
     rows = await _fetchall("SELECT * FROM chats")
+    return [models.ChatSummary.from_row(r) for r in rows]
+
+
+async def list_chats_for_hydration(
+    older_than_days: int = constants.CHAT_HYDRATION_DAYS,
+) -> list[models.ChatSummary]:
+    """Чаты, которые стоит поднять в память при старте.
+
+    list_all_chats() поднимал их все, и на каждый hydrate_cache_from_db()
+    делает ещё один запрос за последними 50 сообщениями. При 7097 чатах это
+    ~14 000 последовательных запросов до того, как бот вообще начнёт отвечать,
+    и цена растёт вместе с историей за все годы.
+
+    Три условия, и каждое отвечает за конкретную поломку, если его убрать:
+
+      unread_count > 0        — экран "📩 Непрочитанные" читает ТОЛЬКО кэш
+                                (bot_cache.get_unread_for_points), в таблицу
+                                chats он не ходит вовсе. Непрочитанный чат,
+                                не поднятый в память, просто исчезает с экрана
+                                — независимо от того, сколько ему лет.
+      last_message_at IS NULL — про возраст такого чата неизвестно ничего;
+                                молчание не повод считать его старым.
+      >= cutoff               — собственно свежесть.
+
+    Старый прочитанный чат ничего не теряет от того, что его нет в памяти:
+    _process_chat при was_cached=False сам дочитывает его из базы
+    (_build_initial_messages + get_chat_summary) в тот момент, когда Avito
+    впервые о нём напомнит.
+    """
+    cutoff = (datetime.utcnow() - timedelta(days=older_than_days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = await _fetchall(
+        """
+        SELECT * FROM chats
+        WHERE unread_count > 0
+           OR last_message_at IS NULL
+           OR last_message_at >= ?
+        """,
+        (cutoff,),
+    )
     return [models.ChatSummary.from_row(r) for r in rows]
 
 
@@ -1237,6 +1309,145 @@ async def prune_old_messages(older_than_days: int = constants.MESSAGE_RETENTION_
     cutoff = (datetime.utcnow() - timedelta(days=older_than_days)).strftime("%Y-%m-%d %H:%M:%S")
     cur = await _execute("DELETE FROM messages WHERE sent_at < ?", (cutoff,))
     return cur.rowcount
+
+
+# --- chat cleanup ------------------------------------------------------------
+
+# Одно условие на две операции. Режим показа ("сколько бы удалилось") и само
+# удаление обязаны смотреть на одно и то же: цифра, на которую человек
+# согласился, не должна расходиться с тем, что реально уйдёт. Две отдельные
+# копии этого WHERE рано или поздно разъедутся, поэтому копия ровно одна.
+#
+# Каждая строчка условия — отдельный запрет, и ни один из них не про возраст:
+#
+#   unread_count = 0        — главный. Удаление чата каскадом уносит его
+#                             messages, а это и есть долговечная защита от
+#                             повторных уведомлений (get_known_message_read_flags).
+#                             Снести историю чата, в котором что-то ещё не
+#                             прочитано, значит выслать всё это заново — ровно
+#                             та регрессия, что уже случалась здесь дважды.
+#   chat_notes              — заметка написана человеком и в Avito её нет. Это
+#                             единственный экземпляр.
+#   scheduled_replies       — 'pending' ещё улетит клиенту, 'sending' застряло и
+#                             намеренно остаётся видимым в карточке. Чат под
+#                             ними должен дожить до развязки.
+#   last_message_at IS NULL — про возраст такого чата мы не знаем ничего. Молчание
+#                             не повод считать его старым: под нож попали бы в
+#                             первую очередь только что созданные.
+_STALE_CHATS_WHERE = """
+    last_message_at IS NOT NULL
+    AND last_message_at < ?
+    AND unread_count = 0
+    AND NOT EXISTS (SELECT 1 FROM chat_notes n WHERE n.chat_id = chats.chat_id)
+    AND NOT EXISTS (
+        SELECT 1 FROM scheduled_replies s
+        WHERE s.chat_id = chats.chat_id AND s.status IN ('pending', 'sending')
+    )
+"""
+
+
+def _chat_cleanup_cutoff(older_than_days: int) -> str:
+    return (datetime.utcnow() - timedelta(days=older_than_days)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def count_stale_chats(older_than_days: int = constants.CHAT_RETENTION_DAYS) -> int:
+    """Сколько чатов удалилось бы прямо сейчас. Ничего не меняет."""
+    row = await _fetchone(
+        f"SELECT COUNT(*) AS n FROM chats WHERE {_STALE_CHATS_WHERE}",
+        (_chat_cleanup_cutoff(older_than_days),),
+    )
+    return int(row["n"]) if row else 0
+
+
+async def chat_cleanup_stats(
+    older_than_days: int = constants.CHAT_RETENTION_DAYS,
+) -> dict[str, int]:
+    """Разбивка для режима показа: сколько уйдёт и что именно удержало остальных.
+
+    Одна цифра "удалится N" непроверяема — по ней нельзя понять, то ли порог
+    слишком мягкий, то ли почти всё защищено непрочитанными. Поэтому счётчики
+    причин считаются тем же условием по возрасту, что и само удаление, и
+    расходятся с ним ровно на защитные оговорки.
+
+    Причины перекрываются (у чата может быть и заметка, и запланированный
+    ответ), так что их сумма не обязана сходиться — это разрезы, а не доли.
+    """
+    cutoff = _chat_cleanup_cutoff(older_than_days)
+    old_enough = "last_message_at IS NOT NULL AND last_message_at < ?"
+
+    async def _count(extra: str) -> int:
+        row = await _fetchone(
+            f"SELECT COUNT(*) AS n FROM chats WHERE {old_enough} AND {extra}", (cutoff,)
+        )
+        return int(row["n"]) if row else 0
+
+    total_row = await _fetchone("SELECT COUNT(*) AS n FROM chats")
+    return {
+        "total": int(total_row["n"]) if total_row else 0,
+        "stale": await count_stale_chats(older_than_days),
+        "held_unread": await _count("unread_count > 0"),
+        "held_notes": await _count(
+            "EXISTS (SELECT 1 FROM chat_notes n WHERE n.chat_id = chats.chat_id)"
+        ),
+        "held_scheduled": await _count(
+            """EXISTS (SELECT 1 FROM scheduled_replies s
+                       WHERE s.chat_id = chats.chat_id AND s.status IN ('pending', 'sending'))"""
+        ),
+    }
+
+
+async def delete_stale_chats(
+    older_than_days: int = constants.CHAT_RETENTION_DAYS,
+    limit: int = constants.CHAT_CLEANUP_BATCH_LIMIT,
+) -> list[str]:
+    """Удалить залежавшиеся чаты и вернуть id ровно тех, что удалились.
+
+    RETURNING, а не "сначала выбрать, потом удалить" — по двум причинам, и ни
+    одна из них не про гонку: все записи в этом модуле идут через _execute(),
+    который берёт тот же _write_lock, что удерживается здесь, так что менять
+    строки между выборкой и удалением всё равно некому. Причины такие:
+    возвращённый список по построению равен удалённому (собранный отдельно мог
+    бы содержать чат, который на самом деле остался, и мы выкинули бы из памяти
+    живой), и это один оператор с одним commit — здесь synchronous на дефолтном
+    FULL, то есть каждый commit это fsync на единственном общем соединении.
+
+    LIMIT через подзапрос, а не `DELETE ... LIMIT`: последнее требует сборки
+    SQLite с SQLITE_ENABLE_UPDATE_DELETE_LIMIT, а на сервере Python собран не
+    нами. Самые старые вперёд — их Avito с наименьшей вероятностью вернёт в
+    ближайшем списке, а значит и throttled-запрос за ними купится реже.
+
+    Возвращённые id ОБЯЗАНЫ быть переданы в bot_cache.drop_chats() — этим
+    занимается chat_cleanup.run_chat_cleanup(), и звать эту функцию в обход
+    него не следует: удалённый из базы чат остаётся в памяти кликабельным по
+    кнопкам в уже доставленных сообщениях Telegram, а отправка в него упрётся
+    в FK на несуществующую строку chats.
+
+    Строки scheduled_replies в конечных статусах ('sent', 'canceled', 'failed')
+    у удалённого чата осознанно остаются сиротами: их никто не читает
+    (list_scheduled_replies_for_chat показывает только pending/sending), а
+    отдельный DELETE ради них стоил бы второго fsync.
+    """
+    conn = _require_conn()
+    async with _write_lock:
+        cur = await conn.execute(
+            f"""
+            DELETE FROM chats WHERE chat_id IN (
+                SELECT chat_id FROM chats
+                WHERE {_STALE_CHATS_WHERE}
+                ORDER BY last_message_at
+                LIMIT ?
+            )
+            RETURNING chat_id
+            """,
+            (_chat_cleanup_cutoff(older_than_days), limit),
+        )
+        # Строки читаются ДО commit(): _execute() коммитит сразу, и результат
+        # RETURNING после этого уже не достать — поэтому здесь своя пара шагов,
+        # а не общий помощник.
+        rows = await cur.fetchall()
+        await cur.close()
+        await conn.commit()
+    return [r["chat_id"] for r in rows]
 
 
 # --- templates ---------------------------------------------------------------

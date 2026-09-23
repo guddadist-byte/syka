@@ -260,6 +260,7 @@ def admin_panel_kb() -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="⭐ Платный доступ", callback_data="adm_payment"))
     builder.row(InlineKeyboardButton(text="✉️ Приветственное сообщение", callback_data="adm_welcome"))
     builder.row(InlineKeyboardButton(text="💾 Резервные копии", callback_data="adm_backup"))
+    builder.row(InlineKeyboardButton(text="🧹 Чистка базы", callback_data="adm_cleanup"))
     builder.row(InlineKeyboardButton(text="🚀 Уведомление о запуске", callback_data="adm_startup"))
     builder.row(InlineKeyboardButton(text="⭐ Отзывы Avito", callback_data="adm_reviews"))
     return builder.as_markup()
@@ -400,6 +401,40 @@ def backup_settings_kb(is_enabled: bool) -> InlineKeyboardMarkup:
     )
     builder.row(InlineKeyboardButton(text="⏱ Периодичность", callback_data="adm_backupinterval"))
     builder.row(InlineKeyboardButton(text="📤 Сделать бэкап сейчас", callback_data="adm_backupnow"))
+    return builder.as_markup()
+
+
+def chat_cleanup_kb(is_enabled: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    # Показ — первой кнопкой и без подтверждения: это единственное действие
+    # здесь, которое ничего не меняет, и именно с него нужно начинать.
+    builder.row(
+        InlineKeyboardButton(text="🔎 Сколько удалится", callback_data="adm_cleanupdry")
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="🔴 Выключить" if is_enabled else "🟢 Включить", callback_data="adm_cleanuptoggle"
+        )
+    )
+    builder.row(InlineKeyboardButton(text="⏱ Срок хранения", callback_data="adm_cleanupdays"))
+    builder.row(InlineKeyboardButton(text="🧹 Почистить сейчас", callback_data="adm_cleanupnow"))
+    return builder.as_markup()
+
+
+def chat_cleanup_confirm_kb(count: int) -> InlineKeyboardMarkup:
+    """Второй шаг перед удалением.
+
+    Число зашито в callback_data не для красоты: между показом и нажатием
+    проходит время, и так подтверждается ровно то количество, которое человек
+    видел, а не то, что успело набежать.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text=f"🗑 Да, удалить {count}", callback_data=f"adm_cleanupgo_{count}"
+        )
+    )
+    builder.row(InlineKeyboardButton(text="Отмена", callback_data="adm_cleanup"))
     return builder.as_markup()
 
 

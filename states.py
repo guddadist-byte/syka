@@ -65,6 +65,9 @@ class AdminStates(StatesGroup):
     waiting_for_startup_recipient = State()
     waiting_for_backup_recipient = State()
 
+    # Chat cleanup
+    waiting_for_cleanup_days = State()
+
     # Broadcast composer
     waiting_for_broadcast_text = State()
     waiting_for_broadcast_photo = State()

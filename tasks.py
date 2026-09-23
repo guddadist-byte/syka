@@ -20,6 +20,7 @@ from aiogram.types import FSInputFile
 
 import avito_client
 import bot_cache
+import chat_cleanup
 import constants
 import database
 import keyboards
@@ -132,8 +133,18 @@ async def hydrate_cache_from_db() -> None:
     from Avito, so "📩 Непрочитанные" is inaccurate/growing for the first
     stretch after every restart. This is a pure DB read (no Avito calls),
     so it's fast even for hundreds of chats.
+
+    Но не для тысяч. На каждый чат здесь идёт ещё один запрос за последними 50
+    сообщениями, и при 7097 чатах это ~14 000 последовательных запросов, пока
+    бот вообще ничего не обслуживает. Поэтому поднимаем не всё подряд, а то,
+    что может понадобиться сразу: непрочитанные любого возраста (экран
+    "📩 Непрочитанные" читает только кэш и в таблицу chats не ходит) плюс всё
+    свежее. Остальное дочитается лениво — _process_chat ниже уже умеет поднять
+    чат из базы в тот момент, когда Avito о нём напомнит.
     """
-    for chat in await database.list_all_chats():
+    loaded = 0
+    for chat in await database.list_chats_for_hydration(constants.CHAT_HYDRATION_DAYS):
+        loaded += 1
         initial_messages = await _build_initial_messages(chat.chat_id)
         read_at = utils.parse_utc(chat.read_at) if chat.read_at else None
         await bot_cache.upsert_chat(
@@ -144,6 +155,12 @@ async def hydrate_cache_from_db() -> None:
                 utils.parse_utc(chat.last_message_at) if chat.last_message_at else None
             ),
         )
+    # Та самая цифра, ради которой гидрацию и ограничили: без неё невозможно
+    # сказать, стало ли после изменения порога лучше или хуже.
+    logger.info(
+        "hydrated %d chat(s) from DB (fresher than %d days, plus every unread)",
+        loaded, constants.CHAT_HYDRATION_DAYS,
+    )
 
 
 async def _process_chat(chat: models.AvitoChat, account: models.AvitoAccount, bot: Bot,
@@ -435,6 +452,29 @@ async def _prune_messages_loop() -> None:
             logger.exception("_prune_messages_loop: failed")
 
 
+async def _chat_cleanup_loop() -> None:
+    """Раз в сутки убирает чаты, до которых уже никому нет дела.
+
+    Выключен по умолчанию (chat_cleanup_config.is_enabled = 0) и читает флаг на
+    каждом круге, а не один раз при старте: включать чистку человек будет
+    кнопкой в настройках, и ждать ради этого перезапуска бота незачем.
+    """
+    while True:
+        await asyncio.sleep(constants.CHAT_CLEANUP_INTERVAL_SECONDS)
+        try:
+            cfg = await database.get_chat_cleanup_config()
+            if not cfg.is_enabled:
+                continue
+            deleted = await chat_cleanup.run_chat_cleanup(cfg.retention_days)
+            # Цикл, который ничего не пишет в лог, невозможно отличить от
+            # мёртвого — этому уже был посвящён отдельный коммит.
+            logger.info(
+                "chat cleanup done: deleted=%d (older than %d days)", deleted, cfg.retention_days,
+            )
+        except Exception:
+            logger.exception("_chat_cleanup_loop: failed")
+
+
 async def run_backup_now(bot: Bot, db_path: str) -> None:
     tmp_path = f"{db_path}.backup-{int(datetime.utcnow().timestamp())}.db"
     await database.vacuum_into(tmp_path)
@@ -685,6 +725,11 @@ async def build_startup_report(*, webapp_enabled: bool, now: datetime | None = N
         f"🔹 Avito-аккаунты: {len(accounts)} активных"
         + (f", ⚠️ с ошибкой опроса: {len(broken)}" if broken else ""),
         f"🔹 Чатов в памяти: {total_chats}, из них непрочитанных: {unread}",
+        # Вторая цифра появилась вместе с ограничением гидрации. Без неё
+        # «Чатов в памяти: 7097» превратилось бы в «Чатов в памяти: 900», и
+        # читалось бы это как «бот потерял чаты», а не как «бот перестал
+        # таскать в память всю историю за все годы».
+        f"🔹 Чатов в базе: {await database.count_rows('SELECT COUNT(*) FROM chats')}",
         f"🔹 Сотрудников на смене: {await database.count_on_shift()}",
         f"🔹 Отложенных ответов в очереди: {await database.count_pending_scheduled_replies()}",
         f"🔹 Мини-приложение: {'включено' if webapp_enabled else 'выключено'}",
@@ -768,13 +813,14 @@ async def run_all_polls(bot: Bot, db_path: str) -> list[asyncio.Task]:
         _watch_task(task, f"poller for {account.name}")
     tasks.append(asyncio.create_task(_reload_accounts_loop()))
     tasks.append(asyncio.create_task(_prune_messages_loop()))
+    tasks.append(asyncio.create_task(_chat_cleanup_loop()))
     tasks.append(asyncio.create_task(_backup_loop(bot, db_path)))
     tasks.append(asyncio.create_task(_orders_poll_loop(bot)))
     tasks.append(asyncio.create_task(_scheduled_replies_loop(bot)))
     tasks.append(asyncio.create_task(_heartbeat_loop()))
     for task, what in zip(tasks[len(accounts):],
-                          ("account reload", "message pruning", "backups", "orders poll",
-                           "scheduled replies", "heartbeat")):
+                          ("account reload", "message pruning", "chat cleanup", "backups",
+                           "orders poll", "scheduled replies", "heartbeat")):
         _watch_task(task, what)
     return tasks
 

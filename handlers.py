@@ -36,12 +36,14 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 import ai_client
 import avito_client
 import bot_cache
+import chat_cleanup
 import chat_sync
 import config
 import constants
 import database
 import guardrail
 import keyboards
+import models
 import utils
 from filters import ApprovedUser, RoleAtLeast, SafeFreeText
 from states import AdminStates, ReplyStates, RegistrationStates
@@ -2295,6 +2297,125 @@ async def cb_admin_backup_now(callback: CallbackQuery) -> None:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
     await callback.message.answer("✅ Бэкап отправлен.")
+
+
+# --- chat cleanup (🧹 Чистка базы) --------------------------------------------
+#
+# Роль не проверяется здесь ни разу и не должна: settings_router уже отфильтрован
+# RoleAtLeast(DIRECTOR) на уровне роутера, и точка контроля доступа в этом
+# проекте ровно одна — фильтр роутера, а не рассыпанные по хендлерам проверки.
+
+
+def _cleanup_screen_text(cfg: models.ChatCleanupConfig) -> str:
+    last = utils.format_msk(cfg.last_run_at) if cfg.last_run_at else "ещё не было"
+    return (
+        "🧹 Чистка базы\n"
+        f"Включена: {'да' if cfg.is_enabled else 'нет'}\n"
+        f"Срок хранения: {cfg.retention_days} дн.\n"
+        f"Последняя чистка: {last} (удалено: {cfg.last_deleted})\n\n"
+        "Удаляются только чаты, где нечего терять: без непрочитанных, без заметок "
+        "и без запланированных ответов. Переписка удалённого чата пропадёт "
+        "безвозвратно — сделайте бэкап перед первым запуском."
+    )
+
+
+@settings_router.callback_query(F.data == "adm_cleanup")
+async def cb_admin_cleanup(callback: CallbackQuery) -> None:
+    await callback.answer()
+    cfg = await database.get_chat_cleanup_config()
+    await callback.message.answer(
+        _cleanup_screen_text(cfg), reply_markup=keyboards.chat_cleanup_kb(bool(cfg.is_enabled))
+    )
+
+
+@settings_router.callback_query(F.data == "adm_cleanupdry")
+async def cb_admin_cleanup_dry(callback: CallbackQuery) -> None:
+    await callback.answer("Считаю…")
+    cfg = await database.get_chat_cleanup_config()
+    stats = await database.chat_cleanup_stats(cfg.retention_days)
+    await callback.message.answer(
+        f"🔎 Порог: {cfg.retention_days} дн.\n\n"
+        f"Всего чатов: {stats['total']}\n"
+        f"Удалится: {stats['stale']}\n\n"
+        "Не тронем, хотя и старые:\n"
+        f"• с непрочитанными — {stats['held_unread']}\n"
+        f"• с заметками — {stats['held_notes']}\n"
+        f"• с запланированным ответом — {stats['held_scheduled']}\n\n"
+        "Сейчас ничего не удалено — это только подсчёт."
+    )
+
+
+@settings_router.callback_query(F.data == "adm_cleanuptoggle")
+async def cb_admin_cleanup_toggle(callback: CallbackQuery) -> None:
+    await callback.answer()
+    cfg = await database.get_chat_cleanup_config()
+    await database.update_chat_cleanup_config(
+        actor_id=callback.from_user.id, is_enabled=0 if cfg.is_enabled else 1
+    )
+    await callback.message.answer(
+        "Готово. Автоматическая чистка выключена."
+        if cfg.is_enabled
+        else "Готово. Чистка будет запускаться раз в сутки."
+    )
+
+
+@settings_router.callback_query(F.data == "adm_cleanupdays")
+async def cb_admin_cleanup_days_start(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    await state.set_state(AdminStates.waiting_for_cleanup_days)
+    await callback.message.answer(
+        "Введите срок хранения в днях (рекомендуется не меньше 90):",
+        reply_markup=keyboards.cancel_kb(),
+    )
+
+
+@settings_router.message(AdminStates.waiting_for_cleanup_days, SafeFreeText())
+async def admin_cleanup_days(message: Message, state: FSMContext) -> None:
+    try:
+        days = int(message.text.strip())
+    except ValueError:
+        await message.answer("Введите целое число.")
+        return
+    # Нижняя граница не вкусовая. Сообщения живут MESSAGE_RETENTION_DAYS = 30
+    # дней, и порог ниже этого означал бы удаление чатов, которые Avito вполне
+    # может вернуть в опрос — каждый такой стоит отдельного throttled-запроса.
+    if days < constants.MESSAGE_RETENTION_DAYS:
+        await message.answer(
+            f"Слишком мало: меньше {constants.MESSAGE_RETENTION_DAYS} дн. чистка начнёт "
+            "удалять чаты, которые ещё в работе. Введите большее число."
+        )
+        return
+    await database.update_chat_cleanup_config(actor_id=message.from_user.id, retention_days=days)
+    await state.clear()
+    await message.answer(f"✅ Сохранено: {days} дн.")
+
+
+@settings_router.callback_query(F.data == "adm_cleanupnow")
+async def cb_admin_cleanup_now(callback: CallbackQuery) -> None:
+    await callback.answer("Считаю…")
+    cfg = await database.get_chat_cleanup_config()
+    count = await database.count_stale_chats(cfg.retention_days)
+    if count == 0:
+        await callback.message.answer("Нечего удалять.")
+        return
+    await callback.message.answer(
+        f"Будет удалено чатов: {count} (старше {cfg.retention_days} дн.).\n"
+        "Их переписка пропадёт безвозвратно. Продолжить?",
+        reply_markup=keyboards.chat_cleanup_confirm_kb(count),
+    )
+
+
+@settings_router.callback_query(F.data.startswith("adm_cleanupgo_"))
+async def cb_admin_cleanup_go(callback: CallbackQuery) -> None:
+    await callback.answer("Чищу…")
+    cfg = await database.get_chat_cleanup_config()
+    deleted = await chat_cleanup.run_chat_cleanup(cfg.retention_days)
+    # Подтверждали конкретное число, и разойтись оно может законно: пока человек
+    # читал вопрос, поллер мог принести новое сообщение в чат-кандидат. Молча
+    # показать другую цифру — значит научить не доверять этому экрану.
+    promised = callback.data.rsplit("_", 1)[-1]
+    suffix = "" if promised == str(deleted) else f" (показывали {promised} — за это время список изменился)"
+    await callback.message.answer(f"✅ Удалено чатов: {deleted}{suffix}")
 
 
 # --- reviews (⭐ Отзывы Avito) ------------------------------------------------

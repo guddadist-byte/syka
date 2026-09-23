@@ -18,7 +18,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Iterable, Literal
 
 from constants import DOUBLE_CLICK_TTL_SECONDS, SHORT_ID_LENGTH
 
@@ -332,6 +332,35 @@ async def mark_replied(chat_id: str, by_user_id: int) -> None:
         if chat is not None:
             chat.last_replied_at = datetime.utcnow()
             chat.last_replied_by = by_user_id
+
+
+async def drop_chats(chat_ids: Iterable[str]) -> int:
+    """Выселить чаты из памяти. Возвращает, сколько их там действительно было.
+
+    Обязательный спутник database.delete_stale_chats(), а не удобство. Гидрация
+    поднимает чаты в память, а callback_data с short_id живёт в уже доставленных
+    сообщениях Telegram неограниченно долго — то есть удалённый из базы чат
+    остаётся и в памяти, и кликабельным. Отправка в него дойдёт до
+    database.append_message и упрётся в FK на несуществующую строку chats.
+
+    Чистить нужно все три структуры, а не только _chats: short_id резолвится
+    через _short_index (в том числе для чата, которого в _chats нет — см.
+    get_short_id), а кнопка "удалить сообщение" ходит в _sent_index по своему
+    собственному ключу, где chat_id лежит в значении, а не в ключе.
+    """
+    wanted = set(chat_ids)
+    if not wanted:
+        return 0
+    async with _lock:
+        removed = 0
+        for chat_id in wanted:
+            if _chats.pop(chat_id, None) is not None:
+                removed += 1
+        for short_id in [s for s, c in _short_index.items() if c in wanted]:
+            del _short_index[short_id]
+        for ref in [r for r, (c, _m) in _sent_index.items() if c in wanted]:
+            del _sent_index[ref]
+        return removed
 
 
 async def count_chats() -> tuple[int, int]:
